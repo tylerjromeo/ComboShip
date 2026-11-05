@@ -1941,8 +1941,12 @@ class DummyEdit extends View implements View.OnKeyListener {
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         ic = new SDLInputConnection(this, true);
 
+        // ComboShip: a "visible password" field makes the keyboard commit characters as typed, with
+        // no suggestions or composing text. Composing let keyboards rewrite whole words (e.g. at an
+        // '_'), which SDL's bridge turned into lost characters, so console commands never matched.
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT |
-                             InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+                             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD |
+                             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
         outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI |
                               EditorInfo.IME_FLAG_NO_FULLSCREEN /* API 11 */;
 

@@ -540,7 +540,30 @@ void ConsoleWindow::DrawElement() {
     }
 }
 
-void ConsoleWindow::Dispatch(const std::string& line) {
+void ConsoleWindow::Dispatch(const std::string& rawLine) {
+#if defined(__ANDROID__)
+    // Android soft keyboards can leave control/whitespace bytes around the committed text (and send
+    // Enter as text), which made every command miss the lookup. Trim them before dispatching.
+    size_t first = 0, last = rawLine.size();
+    while (first < last && static_cast<unsigned char>(rawLine[first]) <= ' ') {
+        first++;
+    }
+    while (last > first && static_cast<unsigned char>(rawLine[last - 1]) <= ' ') {
+        last--;
+    }
+    const std::string line = rawLine.substr(first, last - first);
+    {
+        std::string hex;
+        char b[4];
+        for (unsigned char c : rawLine) {
+            snprintf(b, sizeof(b), "%02x ", c);
+            hex += b;
+        }
+        SPDLOG_DEBUG("Console dispatch: '{}' raw bytes [{}]", line, hex);
+    }
+#else
+    const std::string& line = rawLine;
+#endif
     mCmdHint = "None";
     mHistoryIndex = -1;
     mHistory.push_back(line);
