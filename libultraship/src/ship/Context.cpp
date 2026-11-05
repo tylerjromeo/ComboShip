@@ -305,7 +305,11 @@ bool Context::InitControlDeck(std::shared_ptr<ControlDeck> controlDeck) {
         SPDLOG_WARN("Failed to add SDL game controller mappings from \"{}\" ({})", controllerDb, SDL_GetError());
     }
     SDL_SetHint(SDL_HINT_JOYSTICK_THREAD, "1");
-    if (SDL_Init(SDL_INIT_GAMECONTROLLER) != 0) {
+    if (SDL_Init(SDL_INIT_GAMECONTROLLER
+#ifdef __ANDROID__
+                 | SDL_INIT_SENSOR
+#endif
+                 ) != 0) {
         SPDLOG_WARN("Failed to initialize SDL game controllers ({})", SDL_GetError());
     }
 
@@ -503,8 +507,21 @@ std::string Context::GetShortName() const {
     return mShortName;
 }
 
+#if defined(__ANDROID__)
+static std::string sAndroidDataRootPath;
+
+void Context::SetAndroidDataRootPath(const std::string& path) {
+    if (!path.empty()) {
+        sAndroidDataRootPath = path;
+    }
+}
+#endif
+
 std::string Context::GetAppBundlePath() {
 #if defined(__ANDROID__)
+    if (!sAndroidDataRootPath.empty()) {
+        return sAndroidDataRootPath;
+    }
     const char* externaldir = SDL_AndroidGetExternalStoragePath();
     if (externaldir != NULL) {
         return externaldir;
@@ -568,6 +585,9 @@ std::string Context::GetAppBundlePath() {
 
 std::string Context::GetAppDirectoryPath(const std::string& appName) {
 #if defined(__ANDROID__)
+    if (!sAndroidDataRootPath.empty()) {
+        return sAndroidDataRootPath;
+    }
     const char* externaldir = SDL_AndroidGetExternalStoragePath();
     if (externaldir != NULL) {
         return externaldir;

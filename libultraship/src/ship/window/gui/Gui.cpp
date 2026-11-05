@@ -15,6 +15,10 @@
 #include "ship/window/gui/Fonts.h"
 #include "ship/window/gui/resource/GuiTextureFactory.h"
 #include "ship/window/gui/resource/GuiTexture.h"
+#include "ship/window/gui/SecondaryScreen.h"
+#ifdef __ANDROID__
+#include "ship/port/mobile/MobileImpl.h"
+#endif
 
 namespace Ship {
 #define TOGGLE_BTN ImGuiKey_F1
@@ -255,17 +259,24 @@ void Gui::DrawMenu() {
 
     ImGui::DockSpace(dockId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_None | ImGuiDockNodeFlags_NoDockingInCentralNode);
 
-    if (ImGui::IsKeyPressed(TOGGLE_BTN, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
+    bool androidBackPressed = false;
+#ifdef __ANDROID__
+    androidBackPressed = Mobile::ConsumeGamepadBackPress();
+#endif
+    if (androidBackPressed || ImGui::IsKeyPressed(TOGGLE_BTN, false) || ImGui::IsKeyPressed(ImGuiKey_Escape, false) ||
         (ImGui::IsKeyPressed(TOGGLE_PAD_BTN, false) &&
          Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0))) {
-        if ((ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(TOGGLE_PAD_BTN, false)) && GetMenu()) {
+        if ((androidBackPressed || ImGui::IsKeyPressed(ImGuiKey_Escape, false) || ImGui::IsKeyPressed(TOGGLE_PAD_BTN, false)) && GetMenu()) {
             GetMenu()->ToggleVisibility();
-        } else if ((ImGui::IsKeyPressed(TOGGLE_BTN, false) || ImGui::IsKeyPressed(TOGGLE_PAD_BTN, false)) &&
+        } else if ((androidBackPressed || ImGui::IsKeyPressed(TOGGLE_BTN, false) || ImGui::IsKeyPressed(TOGGLE_PAD_BTN, false)) &&
                    GetMenuBar()) {
             GetMenuBar()->ToggleVisibility();
         }
         Ship::Context::GetRawInstance()->GetWindow()->GetMouseStateManager()->UpdateMouseCapture();
-        if (Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0) &&
+        if (
+#ifndef __ANDROID__
+            Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(CVAR_IMGUI_CONTROLLER_NAV, 0) &&
+#endif
             GetMenuOrMenubarVisible()) {
             mImGuiIo->ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
         } else {
@@ -317,7 +328,14 @@ void Gui::StartFrame() {
     HandleMouseCapture();
     ImGuiBackendNewFrame();
     ImGuiWMNewFrame();
+#ifdef __ANDROID__
+    Mobile::InjectMenuNavKeys();
+    // Java navigation remains available when SDL has no physical gamepad open.
+    mImGuiIo->BackendFlags |= ImGuiBackendFlags_HasGamepad;
+#endif
     ImGui::NewFrame();
+    // Touch drag-to-scroll on a secondary display (no-op without one).
+    SecondaryScreen::AfterNewFrame();
 }
 
 void Gui::EndFrame() {

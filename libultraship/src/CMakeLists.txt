@@ -159,6 +159,8 @@ if (USE_OPENGLES)
     if (CMAKE_SYSTEM_NAME STREQUAL "Android")
         find_library(OPENGLES_LIBRARY GLESv3)
         target_link_libraries(libultraship PRIVATE GLESv3)
+        # SecondaryScreen: EGL surface on a second display + ANativeWindow from a Java Surface.
+        target_link_libraries(libultraship PRIVATE EGL android)
     elseif(CMAKE_SYSTEM_NAME STREQUAL "OpenBSD")
         target_link_libraries(libultraship PRIVATE OpenGL::GLES2)
     else()

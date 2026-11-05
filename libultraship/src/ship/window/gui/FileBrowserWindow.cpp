@@ -1,4 +1,5 @@
 #include "ship/window/gui/FileBrowserWindow.h"
+#include "ship/window/gui/SecondaryScreen.h"
 #include "ship/window/gui/IconsFontAwesome4.h"
 
 #include <imgui.h>
@@ -98,12 +99,12 @@ void FileBrowserWindow::DrawElement() {
 
     const std::string popupId = mRequest.Title + "###ShipFileBrowser";
     if (mOpenPopup) {
-        ImVec2 center = ImGui::GetMainViewport()->GetWorkCenter();
+        ImVec2 center = SecondaryScreen::GetUiScreenCenter();
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
         ImGui::OpenPopup(popupId.c_str());
         mOpenPopup = false;
     }
-    const ImVec2 viewport = ImGui::GetMainViewport()->WorkSize;
+    const ImVec2 viewport = SecondaryScreen::GetUiScreenSize();
     ImGui::SetNextWindowSize(ImVec2(viewport.x * 0.8f, viewport.y * 0.8f), ImGuiCond_Appearing);
 
     if (ImGui::BeginPopupModal(popupId.c_str(), nullptr,

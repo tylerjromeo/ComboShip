@@ -95,9 +95,17 @@ std::shared_ptr<File> O2rArchive::LoadFile(const std::string& filePath) {
 }
 
 bool O2rArchive::Open() {
-    mZipArchive = zip_open(GetPath().c_str(), ZIP_CREATE, nullptr);
+    int zipError = 0;
+    mZipArchive = zip_open(GetPath().c_str(), 0, &zipError);
+#ifdef __ANDROID__
+    // Mod archives on removable storage may be readable but not writable.
+    // Preserve the newer write API when possible, without creating missing files.
     if (mZipArchive == nullptr) {
-        SPDLOG_ERROR("Failed to load zip file \"{}\"", GetPath());
+        mZipArchive = zip_open(GetPath().c_str(), ZIP_RDONLY, &zipError);
+    }
+#endif
+    if (mZipArchive == nullptr) {
+        SPDLOG_ERROR("Failed to load zip file \"{}\" (error: {})", GetPath(), zipError);
         return false;
     }
 

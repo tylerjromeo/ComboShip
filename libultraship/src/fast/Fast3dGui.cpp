@@ -9,6 +9,7 @@
 #include "fast/resource/type/Texture.h"
 #include "ship/window/gui/resource/GuiTextureFactory.h"
 #include "ship/resource/File.h"
+#include "ship/window/gui/SecondaryScreen.h"
 
 #ifdef __APPLE__
 #include <SDL_hints.h>
@@ -48,6 +49,9 @@ Fast3dGui::Fast3dGui(std::vector<std::shared_ptr<Ship::GuiWindow>> guiWindows) :
 void Fast3dGui::Init(GuiWindowInitData windowImpl) {
     mImpl = windowImpl;
     Gui::Init();
+#ifdef __ANDROID__
+    SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+#endif
 }
 
 bool Fast3dGui::SupportsViewports() {
@@ -70,6 +74,14 @@ void Fast3dGui::HandleWindowEvents(Fast::WindowEvent event) {
         case WindowBackend::FAST3D_SDL_OPENGL:
         case WindowBackend::FAST3D_SDL_METAL:
             ImGui_ImplSDL2_ProcessEvent(static_cast<const SDL_Event*>(event.Sdl.Event));
+#ifdef __ANDROID__
+            {
+                const auto* sdlEvent = static_cast<const SDL_Event*>(event.Sdl.Event);
+                if (sdlEvent->type == SDL_WINDOWEVENT && sdlEvent->window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+                    RefreshImGuiGamepads();
+                }
+            }
+#endif
 #if defined(__ANDROID__) || defined(__IOS__)
             Ship::Mobile::ImGuiProcessEvent(ImGui::GetIO().WantTextInput);
 #endif
@@ -266,6 +278,8 @@ void Fast3dGui::ImGuiWMNewFrame() {
         case WindowBackend::FAST3D_SDL_OPENGL:
         case WindowBackend::FAST3D_SDL_METAL:
             ImGui_ImplSDL2_NewFrame();
+            // Widen the canvas onto a secondary display, if one is attached (no-op otherwise).
+            Ship::SecondaryScreen::NewFrame();
             break;
 #ifdef ENABLE_DX11
         case WindowBackend::FAST3D_DXGI_DX11:
@@ -291,7 +305,9 @@ void Fast3dGui::ImGuiRenderDrawData(ImDrawData* data) {
     switch (mImpl.Backend) {
 #ifdef ENABLE_OPENGL
         case WindowBackend::FAST3D_SDL_OPENGL:
-            ImGui_ImplOpenGL3_RenderDrawData(data);
+            if (!Ship::SecondaryScreen::RenderDrawData(data, ImGui_ImplOpenGL3_RenderDrawData)) {
+                ImGui_ImplOpenGL3_RenderDrawData(data);
+            }
             break;
 #endif
 

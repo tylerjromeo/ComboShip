@@ -1,4 +1,5 @@
 #include "ship/window/gui/GameOverlay.h"
+#include "ship/window/gui/SecondaryScreen.h"
 
 #include "ship/config/ConsoleVariable.h"
 #include "ship/resource/File.h"
@@ -116,13 +117,12 @@ void GameOverlay::CleanupNotifications() {
 }
 
 float GameOverlay::GetScreenWidth() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    return viewport->Size.x;
+    // The overlay belongs to the game display, not the whole (possibly dual-screen) ImGui canvas.
+    return SecondaryScreen::GetPrimarySize().x;
 }
 
 float GameOverlay::GetScreenHeight() {
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
-    return viewport->Size.y;
+    return SecondaryScreen::GetPrimarySize().y;
 }
 
 float GameOverlay::GetStringWidth(const char* text) {
@@ -189,7 +189,7 @@ void GameOverlay::Draw() {
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
 
     ImGui::SetNextWindowPos(viewport->Pos, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(viewport->Size, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(SecondaryScreen::GetPrimarySize(), ImGuiCond_Always);
     ImGui::Begin("GameOverlay", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
                      ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings |
