@@ -200,7 +200,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         OUTPUT_NAME "2ship"
     )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
 	# ComboShip: the target is SHARED (upstream built an executable named 2s2h.elf); the launcher
 	# dlopens lib2ship.so, so keep the default lib prefix and the target's own name.
 	set_target_properties(${PROJECT_NAME} PROPERTIES

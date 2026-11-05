@@ -202,6 +202,12 @@ if(NOT CMAKE_BUILD_TYPE )
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Choose the type of build." FORCE)
 endif()
 
+if(ANDROID)
+    # Keep debug APKs playable on-device while retaining file/line crash symbols (as SoH Android).
+    set(CMAKE_C_FLAGS_DEBUG "-O2 -gline-tables-only")
+    set(CMAKE_CXX_FLAGS_DEBUG "-O2 -gline-tables-only")
+endif()
+
 ################################################################################
 # Common utils
 ################################################################################
@@ -261,6 +267,11 @@ add_subdirectory(libultraship ${CMAKE_BINARY_DIR}/libultraship)
 target_compile_options(libultraship PRIVATE "${WARNING_OVERRIDE}")
 target_compile_definitions(libultraship PUBLIC INCLUDE_MPQ_SUPPORT)
 
+# ComboShip Android: codecs, SDL_net and libpng the NDK lacks (needs SDL2 from libultraship).
+if(ANDROID)
+    include(CMake/android-deps.cmake)
+endif()
+
 # Shared ZAPD (in Combo directory)
 add_subdirectory(ZAPDTR/ZAPD ${CMAKE_BINARY_DIR}/ZAPD)
 
@@ -269,6 +280,11 @@ add_subdirectory(OTRExporter ${CMAKE_BINARY_DIR}/OTRExporter)
 # OTRExporter blanks CMAKE_CXX_FLAGS in its own scope, which drops the inherited dynamic-CRT
 # default; force the runtime library on the target so it links the dynamic CRT like everything
 # else (otherwise OTRExporter.lib triggers LNK2038/LNK2005 CRT mismatch in soh.dll / 2ship.dll).
+# ComboShip Android: desktop builds get tinyxml2/libzip headers from the system include path; on
+# Android they are libultraship's FetchContent targets, so link them explicitly.
+if(ANDROID)
+    target_link_libraries(OTRExporter PUBLIC tinyxml2::tinyxml2 libzip::zip)
+endif()
 if(MSVC AND TARGET OTRExporter)
     set_target_properties(OTRExporter PROPERTIES
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -552,5 +568,7 @@ endif()
 #   CPackSetup.cmake         — included now at configure time: static metadata + include(CPack).
 #   CPackProjectConfig.cmake — NOT included here; its path is handed to CPack, which re-runs it at
 #                              pack time, once per generator, for generator-specific component logic.
-set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/CMake/CPackProjectConfig.cmake)
-include(CMake/CPackSetup.cmake)
+if(NOT ANDROID)
+    set(CPACK_PROJECT_CONFIG_FILE ${CMAKE_SOURCE_DIR}/CMake/CPackProjectConfig.cmake)
+    include(CMake/CPackSetup.cmake)
+endif()

@@ -51,7 +51,7 @@ static std::array<const char* const, 14> crashEasterEgg = {
 	"\tOh! MY GOD!!",
 };
 
-#if HAS_POSIX == 1
+#if HAS_POSIX == 1 && !defined(__ANDROID__) // bionic has no backtrace()
 void ErrorHandler(int sig)
 {
 	std::array<void*, 4096> arr;

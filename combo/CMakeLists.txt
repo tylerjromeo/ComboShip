@@ -43,7 +43,9 @@ set(COMBOUI_SOURCES
     gui/ComboCosmeticsSync.cpp
 )
 add_library(comboui SHARED ${COMBOUI_SOURCES})
-set_target_properties(comboui PROPERTIES PREFIX "")
+if(NOT ANDROID) # Android only packages lib*.so, so it keeps the prefix there (libcomboui.so).
+    set_target_properties(comboui PROPERTIES PREFIX "")
+endif()
 # ImGui's std::string InputText helper ships in the fetched tree but not in libultraship's ImGui
 # target. GetProperties re-exports imgui_SOURCE_DIR here (FetchContent ran in libultraship's scope).
 include(FetchContent)
@@ -84,7 +86,15 @@ set(COMBO_SOURCES
 )
 
 # Create executable
-add_executable(ComboShip ${COMBO_SOURCES})
+if(ANDROID)
+    # ComboShip Android: SDLActivity loads libmain.so and calls its SDL_main; the game modules are
+    # dlopened from the APK's native library dir exactly as on Linux.
+    add_library(ComboShip SHARED ${COMBO_SOURCES})
+    set_target_properties(ComboShip PROPERTIES OUTPUT_NAME "main")
+    target_link_libraries(ComboShip PRIVATE log)
+else()
+    add_executable(ComboShip ${COMBO_SOURCES})
+endif()
 
 # Portable relative-include fix: MSVC VS generator implicitly adds the source file's directory,
 # but Ninja/Unix builds do not. Explicitly add the combo source dir so that includes like
@@ -165,7 +175,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Windows")
         target_link_options(ComboShip PRIVATE
             $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS;/ENTRY:mainCRTStartup>)
     endif()
-else()
+elseif(NOT ANDROID)
     # ComboShip Linux/macOS: the games' shared objects land in their own build dirs; mirror the
     # Windows single-deploy-dir layout by symlinking them beside the launcher, whose loader dlopens
     # ./libsoh.so etc. from its own directory (cwd == exe dir at runtime). Symlinks, not copies:
@@ -193,6 +203,7 @@ endif()
     # fails on ("Raw data size: 0x0", reached EOF). Clearing makes the source tree authoritative each
     # build. (The user's ROM/port archives live in the dir root, NOT under assets/, so this is safe.)
     # See docs/merges/2026-06-20.md.
+if(NOT ANDROID) # Android packages the runtime tree as APK assets (Android/app/build.gradle).
     add_custom_command(TARGET ComboShip POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E rm -rf $<TARGET_FILE_DIR:ComboShip>/assets
         COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -226,6 +237,7 @@ endif()
     else()
         message(STATUS "ComboShip: mm/2ship.o2r not found — skipping .o2r deploy (run Generate2ShipOtr to produce it).")
     endif()
+endif() # NOT ANDROID
 
 # ─── macOS ──────────────────────────────────────────────────────────────────────────────────────
 # Everything the ELF port already handles is deliberately absent here: hidden visibility and the

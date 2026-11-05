@@ -30,8 +30,11 @@
 #include <nlohmann/json.hpp>
 
 // SDL_net.h pulls in SDL.h -> SDL_main.h, which #defines main -> SDL_main unless we opt out.
-// ComboShip provides its own main(), so suppress SDL's entry-point hijack.
+// ComboShip provides its own main(), so suppress SDL's entry-point hijack — except on Android,
+// where SDLActivity calls SDL_main in libmain.so (this launcher), so main() must become it.
+#ifndef __ANDROID__
 #define SDL_MAIN_HANDLED
+#endif
 #include <SDL2/SDL_net.h>
 
 #include "rando/CrossForeign.h"
@@ -177,7 +180,9 @@ static std::filesystem::path ComboExeDir() {
 // directory first, which is exactly where the deploy rules pin the DLLs, so re-rooting would only
 // swap a working path for an untested one.
 static std::string ComboModulePath(const char* leaf) {
-#ifdef _WIN32
+#if defined(_WIN32) || defined(__ANDROID__)
+    // Android: a bare soname resolves against the APK's native library dir (the app's linker
+    // namespace); /proc/self/exe is app_process there, not the launcher.
     return std::string(leaf);
 #else
     const auto dir = ComboExeDir();
@@ -208,7 +213,11 @@ static DllHandle LoadDll(const char* name) {
     // layout is portable (modules beside the executable, cwd == exe dir), so anchor it.
     // RTLD_GLOBAL is what lets Combo_ResolveSym use one process-wide lookup; the games build
     // with hidden visibility so only the combo ABI lands in the global namespace.
+#ifdef __ANDROID__
+    const std::string path = name;
+#else
     std::string path = std::strchr(name, '/') ? name : std::string("./") + name;
+#endif
     return dlopen(path.c_str(), RTLD_NOW | RTLD_GLOBAL);
 }
 static void* GetSym(DllHandle h, const char* sym) {
@@ -3040,6 +3049,10 @@ int main(int argc, char** argv) {
     const char* sohDll = "libsoh.dylib";
     const char* twoShipDll = "lib2ship.dylib";
     const char* comboUiDll = "comboui.dylib"; // comboui sets PREFIX "" (see combo/CMakeLists.txt)
+#elif defined(__ANDROID__)
+    const char* sohDll = "libsoh.so";
+    const char* twoShipDll = "lib2ship.so";
+    const char* comboUiDll = "libcomboui.so"; // APKs only package lib*.so (combo/CMakeLists.txt)
 #else
     const char* sohDll = "libsoh.so";
     const char* twoShipDll = "lib2ship.so";

@@ -1,0 +1,10 @@
+# ComboShip Android: satisfied by CMake/android-deps.cmake (FetchContent), not a system lookup.
+set(OpusFile_FOUND TRUE)
+if(NOT TARGET Opusfile::Opusfile)
+    set(OpusFile_FOUND FALSE)
+endif()
+if(NOT TARGET OpusFile::opusfile)
+    set(OpusFile_FOUND FALSE)
+endif()
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(OpusFile REQUIRED_VARS OpusFile_FOUND)

@@ -256,7 +256,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Darwin")
         XCODE_ATTRIBUTE_CLANG_ENABLE_OBJC_ARC YES
         OUTPUT_NAME "soh"
     )
-elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|Android")
     # ComboShip: the target is SHARED (upstream built an executable named soh.elf); the launcher
     # dlopens libsoh.so, so keep the default lib prefix and a plain name.
     set_target_properties(${PROJECT_NAME} PROPERTIES

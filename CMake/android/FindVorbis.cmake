@@ -1,0 +1,13 @@
+# ComboShip Android: satisfied by CMake/android-deps.cmake (FetchContent), not a system lookup.
+set(Vorbis_FOUND TRUE)
+if(NOT TARGET Vorbis::vorbis)
+    set(Vorbis_FOUND FALSE)
+endif()
+if(NOT TARGET Vorbis::vorbisenc)
+    set(Vorbis_FOUND FALSE)
+endif()
+if(NOT TARGET Vorbis::vorbisfile)
+    set(Vorbis_FOUND FALSE)
+endif()
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(Vorbis REQUIRED_VARS Vorbis_FOUND)
