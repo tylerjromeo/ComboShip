@@ -1,3 +1,6 @@
+#ifdef __ANDROID__
+#include <SDL2/SDL_system.h> // SDL_AndroidGetInternalStoragePath
+#endif
 #ifdef _WIN32
 #include <Windows.h>
 #include <winuser.h>
@@ -575,7 +578,14 @@ const char* Extractor::GetZapdVerStr() const {
 }
 
 std::string Extractor::Mkdtemp() {
+#ifdef __ANDROID__
+    // No system temp dir for apps; use app-private storage (a real Linux filesystem, so the MM
+    // extractor's assets symlink below works there, unlike on the FUSE-backed shared storage).
+    const char* internalStorage = SDL_AndroidGetInternalStoragePath();
+    std::string temp_dir = internalStorage ? internalStorage : ".";
+#else
     std::string temp_dir = std::filesystem::temp_directory_path().string();
+#endif
 
     // create 6 random alphanumeric characters
     static const char charset[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";

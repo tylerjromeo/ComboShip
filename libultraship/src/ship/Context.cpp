@@ -522,6 +522,12 @@ std::string Context::GetAppBundlePath() {
     if (!sAndroidDataRootPath.empty()) {
         return sAndroidDataRootPath;
     }
+#ifdef COMBO_BUILD
+    // ComboShip: the launcher exports the data folder MainActivity set up (combo/ComboShip.cpp).
+    if (const char* shipHome = getenv("SHIP_HOME"); shipHome != nullptr && shipHome[0] != '\0') {
+        return shipHome;
+    }
+#endif
     const char* externaldir = SDL_AndroidGetExternalStoragePath();
     if (externaldir != NULL) {
         return externaldir;
@@ -588,6 +594,12 @@ std::string Context::GetAppDirectoryPath(const std::string& appName) {
     if (!sAndroidDataRootPath.empty()) {
         return sAndroidDataRootPath;
     }
+#ifdef COMBO_BUILD
+    // ComboShip: the launcher exports the data folder MainActivity set up (combo/ComboShip.cpp).
+    if (const char* shipHome = getenv("SHIP_HOME"); shipHome != nullptr && shipHome[0] != '\0') {
+        return shipHome;
+    }
+#endif
     const char* externaldir = SDL_AndroidGetExternalStoragePath();
     if (externaldir != NULL) {
         return externaldir;

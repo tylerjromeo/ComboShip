@@ -1,0 +1,1576 @@
+
+package com.dishii.soh;
+import org.libsdl.app.SDLActivity;
+
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Environment;
+
+import android.provider.Settings;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.FileOutputStream;
+import java.io.FileInputStream;
+import java.util.concurrent.CountDownLatch;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+import android.Manifest;
+import android.content.pm.PackageManager;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
+import android.os.Build;
+import android.view.WindowManager;
+import android.widget.Toast;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+
+import android.util.Log;
+
+import android.view.KeyEvent;
+import android.view.Gravity;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.graphics.Rect;
+import android.graphics.Color;
+import android.view.LayoutInflater;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewTreeObserver;
+import android.widget.ImageView;
+import java.util.Arrays;
+
+import java.util.concurrent.Executors;
+import android.app.AlertDialog;
+
+import android.view.InputDevice;
+import android.os.Vibrator;
+import android.os.VibrationEffect;
+
+// ComboShip Android activity. Adapted from linkzenic/Shipwright-Ports (SoH 9.3.1-android.3): Java
+// owns storage permission, the data folder and copying the bundled support files; the native
+// launcher (libmain.so) blocks in waitForSetupFromNative() until that is done, then runs both games.
+public class MainActivity extends SDLActivity{
+
+    // Every module is loaded through System.loadLibrary (not only by the launcher's dlopen) so that
+    // JNI can bind the native methods each one implements. "main" (the launcher) must stay last:
+    // SDLActivity calls SDL_main in the last library of this list.
+    @Override
+    protected String[] getLibraries() {
+        return new String[] { "SDL2", "ultraship", "soh", "2ship", "comboui", "main" };
+    }
+
+    SharedPreferences preferences;
+    private static final CountDownLatch setupLatch = new CountDownLatch(1);
+    private volatile boolean mIsAiming = false;
+    private static final int COPY_BUFFER_SIZE = 65536;
+    private static final int RUMBLE_MAX_DURATION_MS = 5000;
+    private static final String DATA_FOLDER_NAME = BuildConfig.DEBUG ? "ComboShip-Test" : "ComboShip";
+    private static String currentDataRootPath = "/storage/emulated/0/" + DATA_FOLDER_NAME;
+    private static final String PREF_DATA_ROOT_PATH = "dataRootPath";
+    private static final String PREF_LEGACY_DATA_MIGRATION_COMPLETE = "legacyDataMigrationComplete";
+    private static final String PREF_TOUCH_CONTROLS_DISABLED = "touchControlsDisabled";
+    // ComboShip has no in-game toggle for the overlay yet, and the first target (AYN Thor) has
+    // physical controls, so it starts hidden.
+    private static final boolean TOUCH_CONTROLS_DISABLED_DEFAULT = true;
+    // Legacy key name: true means the touch controls are hidden, not visible.
+    private static final String PREF_TOUCH_CONTROLS_HIDDEN = "controlsVisible";
+    private static final String PREF_TOUCH_FACE_BUTTON_LAYOUT = "touchFaceButtonLayout";
+    private static final String PREF_TOUCH_LEFT_STICK_FLOATING = "touchLeftStickFloating";
+    private static final int TOUCH_FACE_BUTTON_LAYOUT_ABXY = 0;
+    private static final int TOUCH_FACE_BUTTON_LAYOUT_BAYX = 1;
+    private static final int TOUCH_FACE_BUTTON_LAYOUT_GAMECUBE = 2;
+    private static final String SUPPORT_FILES_VERSION_MARKER = ".android_support_files_version";
+    // Bump only for support archive/layout changes. Extractor YAML is content-versioned separately.
+    private static final String SUPPORT_FILES_VERSION = "comboship-0.3.0-android-1";
+    // ComboShip's two port archives, bundled in the APK and copied to the data folder root.
+    private static final String[] SUPPORT_ARCHIVES = { "soh.o2r", "2ship.o2r" };
+    private AlertDialog dataRootMigrationDialog;
+    private AlertDialog setupProgressDialog;
+    // Draws the ImGui menus/trackers on a second physical display, when the device has one.
+    private DualScreenManager dualScreenManager;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        Log.i("ComboShip", "onCreate start");
+
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // Apply Android's immersive window style while support files are prepared,
+        // before the native renderer creates its fullscreen window.
+        setWindowStyle(true);
+
+        preferences = getSharedPreferences("com.comboship.prefs", Context.MODE_PRIVATE);
+        updateCurrentDataRootPath();
+
+        Log.i("ComboShip", "hasStoragePermission=" + hasStoragePermission());
+
+        // Check if storage permissions are granted
+        if (hasStoragePermission()) {
+            beginSetupOrChooseDataRoot();
+        } else {
+            requestStoragePermission();
+        }
+
+        setupControllerOverlay();
+        attachController();
+
+        dualScreenManager = new DualScreenManager(this);
+
+        Log.i("ComboShip", "onCreate complete");
+    }
+
+    public static void waitForSetupFromNative() {
+        try {
+            setupLatch.await();  // Block until setup is complete
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static String getDataRootPathFromNative() {
+        return currentDataRootPath;
+    }
+
+    private void doVersionCheck() {
+        int currentVersion = BuildConfig.VERSION_CODE;
+        int storedVersion = preferences.getInt("appVersion", 1);
+
+        if (currentVersion > storedVersion) {
+            preferences.edit().putInt("appVersion", currentVersion).apply();
+        }
+    }
+
+    private void refreshBundledSupportFiles() {
+        File targetRootFolder = getTargetRootFolder();
+
+        // These files come from the APK. ROM archives are user-generated and
+        // are retained across support updates; native version checks request
+        // re-extraction only when their format is actually incompatible.
+        for (String archive : SUPPORT_ARCHIVES) {
+            deleteIfExists(new File(targetRootFolder, archive));
+        }
+        deleteIfExists(getSupportFilesMarkerFile(targetRootFolder));
+    }
+
+    private File getSupportFilesMarkerFile(File targetRootFolder) {
+        return new File(targetRootFolder, SUPPORT_FILES_VERSION_MARKER);
+    }
+
+    private boolean isSupportFilesMarkerCurrent() {
+        File markerFile = getSupportFilesMarkerFile(getTargetRootFolder());
+        if (!markerFile.exists()) {
+            return false;
+        }
+
+        try (InputStream in = new FileInputStream(markerFile)) {
+            byte[] buffer = new byte[(int) markerFile.length()];
+            int read = in.read(buffer);
+            if (read <= 0) {
+                return false;
+            }
+            String markerVersion = new String(buffer, 0, read).trim();
+            return markerVersion.equals(SUPPORT_FILES_VERSION);
+        } catch (IOException e) {
+            Log.w("setupFiles", "Unable to read support files marker", e);
+            return false;
+        }
+    }
+
+    private void writeSupportFilesMarker(File targetRootFolder) throws IOException {
+        File markerFile = getSupportFilesMarkerFile(targetRootFolder);
+        try (OutputStream out = new FileOutputStream(markerFile)) {
+            out.write(SUPPORT_FILES_VERSION.getBytes());
+        }
+    }
+
+    private void deleteIfExists(File file) {
+        if (file.exists()) {
+            if (file.delete()) {
+                Log.i("deleteAssets", "Deleted file: " + file.getAbsolutePath());
+            } else {
+                Log.w("deleteAssets", "Failed to delete file: " + file.getAbsolutePath());
+            }
+        } else {
+            Log.i("deleteAssets", "File not found (skipped): " + file.getAbsolutePath());
+        }
+    }
+
+    private void deleteRecursiveIfExists(File dir) throws IOException {
+        if (dir.exists()) {
+            deleteRecursive(dir);
+            Log.i("deleteAssets", "Deleted directory: " + dir.getAbsolutePath());
+        } else {
+            Log.i("deleteAssets", "Directory not found (skipped): " + dir.getAbsolutePath());
+        }
+    }
+
+    private void deleteRecursive(File fileOrDirectory) throws IOException {
+        if (fileOrDirectory.isDirectory()) {
+            File[] children = fileOrDirectory.listFiles();
+            if (children == null) {
+                throw new IOException("Unable to list bundled asset directory: " + fileOrDirectory);
+            }
+            for (File child : children) {
+                deleteRecursive(child);
+            }
+        }
+        deleteRequiredFile(fileOrDirectory);
+    }
+
+    private void deleteRequiredFile(File file) throws IOException {
+        if (file.exists() && !file.delete()) {
+            throw new IOException("Unable to refresh bundled support file: " + file);
+        }
+    }
+
+    private File getTargetRootFolder() {
+        String configuredPath = preferences.getString(PREF_DATA_ROOT_PATH, null);
+        if (configuredPath == null || configuredPath.isEmpty()) {
+            return getDefaultDataRootFolder();
+        }
+
+        return new File(configuredPath);
+    }
+
+    private File getDefaultDataRootFolder() {
+        return new File(Environment.getExternalStorageDirectory(), DATA_FOLDER_NAME);
+    }
+
+    private void updateCurrentDataRootPath() {
+        currentDataRootPath = getTargetRootFolder().getAbsolutePath();
+        Log.i("setupFiles", "Current data root: " + currentDataRootPath);
+    }
+
+    private void beginSetupOrChooseDataRoot() {
+        if (!preferences.contains(PREF_DATA_ROOT_PATH)) {
+            preferences.edit().putString(PREF_DATA_ROOT_PATH, getDefaultDataRootFolder().getAbsolutePath()).apply();
+        }
+        beginSetupIfStorageReady();
+    }
+
+    private static class DataRootOption {
+        final String label;
+        final File folder;
+
+        DataRootOption(String label, File folder) {
+            this.label = label;
+            this.folder = folder;
+        }
+    }
+
+    private List<DataRootOption> getDataRootOptions() {
+        Map<String, DataRootOption> options = new LinkedHashMap<>();
+        File defaultFolder = getDefaultDataRootFolder();
+        options.put(defaultFolder.getAbsolutePath(),
+                new DataRootOption("Internal storage: " + defaultFolder.getAbsolutePath(), defaultFolder));
+
+        File[] externalDirs = getExternalFilesDirs(null);
+        if (externalDirs != null) {
+            for (File externalDir : externalDirs) {
+                if (externalDir == null || !Environment.isExternalStorageRemovable(externalDir)) {
+                    continue;
+                }
+
+                File volumeRoot = getVolumeRootFromExternalFilesDir(externalDir);
+                if (volumeRoot == null) {
+                    continue;
+                }
+
+                File sdFolder = new File(volumeRoot, DATA_FOLDER_NAME);
+                options.put(sdFolder.getAbsolutePath(),
+                        new DataRootOption("SD card: " + sdFolder.getAbsolutePath(), sdFolder));
+            }
+        }
+
+        return new ArrayList<>(options.values());
+    }
+
+    private File getVolumeRootFromExternalFilesDir(File externalDir) {
+        String path = externalDir.getAbsolutePath();
+        String suffix = "/Android/data/" + getPackageName() + "/files";
+        int suffixIndex = path.indexOf(suffix);
+        if (suffixIndex > 0) {
+            return new File(path.substring(0, suffixIndex));
+        }
+
+        File parent = externalDir;
+        for (int i = 0; i < 4 && parent != null; i++) {
+            parent = parent.getParentFile();
+        }
+        return parent;
+    }
+
+    private void showDataRootChooser(boolean restartRequired) {
+        List<DataRootOption> options = getDataRootOptions();
+
+        if (options.size() < 2) {
+            runOnUiThread(() -> new AlertDialog.Builder(this)
+                    .setTitle("Change Data Folder")
+                    .setMessage("No alternate writable data folder was found. Insert or mount an SD card and try again.")
+                    .setPositiveButton("OK", null)
+                    .setCancelable(true)
+                    .show());
+            return;
+        }
+
+        runOnUiThread(() -> {
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int padding = (int) (20 * getResources().getDisplayMetrics().density);
+            layout.setPadding(padding, padding, padding, padding);
+
+            TextView message = new TextView(this);
+            message.setText("Choose where ComboShip stores saves, mods, settings, and support files.");
+            message.setTextColor(Color.BLACK);
+            layout.addView(message);
+
+            AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setTitle("Change Data Folder")
+                    .setView(layout)
+                    .setNegativeButton("Cancel", null)
+                    .setCancelable(true)
+                    .create();
+
+            for (DataRootOption option : options) {
+                Button optionButton = new Button(this);
+                optionButton.setAllCaps(false);
+                optionButton.setText(option.label);
+                optionButton.setTextColor(Color.BLACK);
+                optionButton.setOnClickListener((view) -> {
+                    dialog.dismiss();
+                    Executors.newSingleThreadExecutor()
+                            .execute(() -> applyDataRootSelection(option.folder, restartRequired));
+                });
+                layout.addView(optionButton);
+            }
+
+            dialog.show();
+        });
+    }
+
+    private void applyDataRootSelection(File targetRootFolder, boolean restartRequired) {
+        File previousRoot = getTargetRootFolder();
+        Log.i("setupFiles", "Changing data root from " + previousRoot.getAbsolutePath() +
+                " to " + targetRootFolder.getAbsolutePath());
+        preferences.edit().putString(PREF_DATA_ROOT_PATH, targetRootFolder.getAbsolutePath()).apply();
+        updateCurrentDataRootPath();
+
+        if (!ensureTargetRootFolderReady(targetRootFolder)) {
+            preferences.edit().putString(PREF_DATA_ROOT_PATH, previousRoot.getAbsolutePath()).apply();
+            updateCurrentDataRootPath();
+            showSetupFailure("The selected data folder is not writable.");
+            return;
+        }
+
+        boolean willMigrateData = shouldMigrateExistingRoot(previousRoot, targetRootFolder) ||
+                shouldMigrateExistingRoot(getDefaultDataRootFolder(), targetRootFolder);
+        if (willMigrateData) {
+            showDataRootMigrationDialog();
+        }
+        migrateExistingRootIfNeeded(previousRoot, targetRootFolder);
+        migrateExistingRootIfNeeded(getDefaultDataRootFolder(), targetRootFolder);
+        if (willMigrateData) {
+            dismissDataRootMigrationDialog();
+        }
+
+        if (restartRequired) {
+            runOnUiThread(() -> new AlertDialog.Builder(this)
+                    .setTitle("Restart Required")
+                    .setMessage("ComboShip will use the new data folder after restarting. Existing data was copied when needed; the old folder was left in place.")
+                    .setCancelable(false)
+                    .setPositiveButton("Close App", (dialog, which) -> finish())
+                    .show());
+            return;
+        }
+
+        beginSetupIfStorageReady();
+    }
+
+    private void showDataRootMigrationDialog() {
+        runOnUiThread(() -> {
+            if (dataRootMigrationDialog != null && dataRootMigrationDialog.isShowing()) {
+                return;
+            }
+
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int padding = (int) (20 * getResources().getDisplayMetrics().density);
+            layout.setPadding(padding, padding, padding, padding);
+
+            ProgressBar progressBar = new ProgressBar(this);
+            progressBar.setIndeterminate(true);
+            layout.addView(progressBar);
+
+            TextView message = new TextView(this);
+            message.setText("Copying saves, mods, settings, and support files. This may take a few minutes.");
+            message.setTextColor(Color.BLACK);
+            layout.addView(message);
+
+            dataRootMigrationDialog = new AlertDialog.Builder(this)
+                    .setTitle("Moving Data Folder")
+                    .setView(layout)
+                    .setCancelable(false)
+                    .create();
+            dataRootMigrationDialog.show();
+        });
+    }
+
+    private void dismissDataRootMigrationDialog() {
+        runOnUiThread(() -> {
+            if (dataRootMigrationDialog != null && dataRootMigrationDialog.isShowing()) {
+                dataRootMigrationDialog.dismiss();
+            }
+            dataRootMigrationDialog = null;
+        });
+    }
+
+    private void showSetupProgressDialog(String title, String text) {
+        runOnUiThread(() -> {
+            if (setupProgressDialog != null && setupProgressDialog.isShowing()) {
+                return;
+            }
+
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int padding = (int) (20 * getResources().getDisplayMetrics().density);
+            layout.setPadding(padding, padding, padding, padding);
+
+            ProgressBar progressBar = new ProgressBar(this);
+            progressBar.setIndeterminate(true);
+            layout.addView(progressBar);
+
+            TextView message = new TextView(this);
+            message.setText(text);
+            message.setTextColor(Color.BLACK);
+            layout.addView(message);
+
+            setupProgressDialog = new AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setView(layout)
+                    .setCancelable(false)
+                    .create();
+            setupProgressDialog.show();
+        });
+    }
+
+    private void dismissSetupProgressDialog() {
+        runOnUiThread(() -> {
+            if (setupProgressDialog != null && setupProgressDialog.isShowing()) {
+                setupProgressDialog.dismiss();
+            }
+            setupProgressDialog = null;
+        });
+    }
+
+    private void migrateExistingRootIfNeeded(File sourceRoot, File targetRoot) {
+        if (!shouldMigrateExistingRoot(sourceRoot, targetRoot)) {
+            return;
+        }
+
+        try {
+            Log.i("setupFiles", "Copying existing data from " + sourceRoot.getAbsolutePath() +
+                    " to " + targetRoot.getAbsolutePath());
+            AssetCopyUtil.copyDirectoryContentsNoOverwrite(sourceRoot, targetRoot);
+            Log.i("setupFiles", "Copied existing data from: " + sourceRoot.getAbsolutePath());
+        } catch (IOException e) {
+            Log.e("setupFiles", "Failed to copy existing data from: " + sourceRoot.getAbsolutePath(), e);
+            runOnUiThread(() -> Toast.makeText(this, "Could not copy existing data", Toast.LENGTH_LONG).show());
+        }
+    }
+
+    private boolean shouldMigrateExistingRoot(File sourceRoot, File targetRoot) {
+        return sourceRoot != null && targetRoot != null &&
+                !sourceRoot.getAbsolutePath().equals(targetRoot.getAbsolutePath()) &&
+                sourceRoot.isDirectory() && isDirectoryEmpty(targetRoot);
+    }
+
+    private boolean isDirectoryEmpty(File directory) {
+        File[] files = directory.listFiles();
+        return files == null || files.length == 0;
+    }
+
+
+
+    // Check if storage permission is granted
+    private boolean hasStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11 and above
+            return Environment.isExternalStorageManager();
+        } else {
+            // Android 10 and below
+            return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_EXTERNAL_STORAGE)
+                    == PackageManager.PERMISSION_GRANTED &&
+                    ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            == PackageManager.PERMISSION_GRANTED;
+        }
+    }
+
+    private static final int STORAGE_PERMISSION_REQUEST_CODE = 2296;
+    private static final int FILE_PICKER_REQUEST_CODE = 0;
+
+    private void requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Android 11+ → MANAGE_EXTERNAL_STORAGE
+            if (!Environment.isExternalStorageManager()) {
+                Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                intent.setData(Uri.parse("package:" + getPackageName()));
+                startActivityForResult(intent, STORAGE_PERMISSION_REQUEST_CODE);
+            } else {
+                beginSetupOrChooseDataRoot();
+            }
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            // Android 6–10 → request READ/WRITE at runtime
+            ActivityCompat.requestPermissions(this,
+                    new String[]{
+                            Manifest.permission.READ_EXTERNAL_STORAGE,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE
+                    },
+                    STORAGE_PERMISSION_REQUEST_CODE);
+        } else {
+            // Below Android 6 → permissions granted at install time
+            beginSetupOrChooseDataRoot();
+        }
+    }
+
+    private void beginSetupIfStorageReady() {
+        updateCurrentDataRootPath();
+        File targetRootFolder = getTargetRootFolder();
+        Log.i("setupFiles", "Beginning setup for data root: " + targetRootFolder.getAbsolutePath());
+        if (!ensureTargetRootFolderReady(targetRootFolder)) {
+            showStorageAccessFailure();
+            return;
+        }
+
+        doVersionCheck();
+        checkAndSetupFiles();
+    }
+
+    private boolean ensureTargetRootFolderReady(File targetRootFolder) {
+        if (!isExternalStorageWritable() || !hasStoragePermission()) {
+            return false;
+        }
+
+        if (!targetRootFolder.exists() && !targetRootFolder.mkdirs()) {
+            Log.e("setupFiles", "Failed to create root folder: " + targetRootFolder.getAbsolutePath());
+            return false;
+        }
+
+        if (!targetRootFolder.isDirectory() || !targetRootFolder.canWrite()) {
+            Log.e("setupFiles", "Root folder is not writable: " + targetRootFolder.getAbsolutePath());
+            return false;
+        }
+
+        File probeFile = new File(targetRootFolder, ".write_test");
+        try (OutputStream out = new FileOutputStream(probeFile)) {
+            out.write(0);
+        } catch (IOException e) {
+            Log.e("setupFiles", "Write probe failed for: " + targetRootFolder.getAbsolutePath(), e);
+            return false;
+        }
+
+        if (probeFile.exists() && !probeFile.delete()) {
+            Log.w("setupFiles", "Failed to delete write probe: " + probeFile.getAbsolutePath());
+        }
+
+        return true;
+    }
+
+    public void checkAndSetupFiles() {
+        File targetRootFolder = getTargetRootFolder();
+        File assetsFolder = new File(targetRootFolder, "assets");
+        boolean isMissingAssets = !assetsFolder.exists() || assetsFolder.listFiles() == null || assetsFolder.listFiles().length == 0;
+        boolean isMissingArchive = false;
+        for (String archive : SUPPORT_ARCHIVES) {
+            File archiveFile = new File(targetRootFolder, archive);
+            isMissingArchive |= !archiveFile.isFile() || archiveFile.length() == 0;
+        }
+
+        if (!targetRootFolder.exists() || isMissingAssets || isMissingArchive || !isSupportFilesMarkerCurrent()
+                || !ExtractorAssetState.isCurrent(targetRootFolder, getBundledExtractorVersion())) {
+            showSetupProgressDialog("Preparing Data Folder",
+                    "Copying required support files. Please keep ComboShip open; SD cards may take a few minutes.");
+            Executors.newSingleThreadExecutor().execute(() -> setupFilesInBackground(targetRootFolder));
+        } else {
+            setupLatch.countDown();
+        }
+    }
+
+    private String getBundledExtractorVersion() {
+        try (InputStream input = getAssets().open("extractor.version")) {
+            byte[] bytes = new byte[128];
+            int count = input.read(bytes);
+            String revision = count > 0 ? new String(bytes, 0, count, java.nio.charset.StandardCharsets.UTF_8).trim() : "";
+            return revision.matches("[0-9a-f]{64}") ? revision : null;
+        } catch (IOException e) {
+            Log.e("setupFiles", "Missing bundled extractor revision", e);
+            return null;
+        }
+    }
+
+    private void setupFilesInBackground(File targetRootFolder) {
+        boolean setupFailed = false;
+        Log.i("setupFiles", "Copying support files to: " + targetRootFolder.getAbsolutePath());
+
+        if (!ensureTargetRootFolderReady(targetRootFolder)) {
+            dismissSetupProgressDialog();
+            showStorageAccessFailure();
+            return;
+        }
+
+        String extractorVersion = getBundledExtractorVersion();
+        if (extractorVersion == null) {
+            dismissSetupProgressDialog();
+            showSetupFailure("The bundled extractor version is missing. Please install a complete APK build.");
+            return;
+        }
+        // Read legacy state before refreshing its support marker. Code/shader-only
+        // updates must not delete and recopy over 20,000 unchanged YAML files.
+        boolean copyExtractor = ExtractorAssetState.needsCopy(targetRootFolder, extractorVersion);
+        if (!isSupportFilesMarkerCurrent()) {
+            refreshBundledSupportFiles();
+        }
+
+        // Always ensure mods folder exists
+        File targetModsDir = new File(targetRootFolder, "mods");
+        if (!targetModsDir.exists() && !targetModsDir.mkdirs()) {
+            dismissSetupProgressDialog();
+            showSetupFailure("Failed to create the mods folder.");
+            return;
+        }
+
+        // Copy assets/ from internal
+        File targetAssetsDir = new File(targetRootFolder, "assets");
+        try {
+            if (copyExtractor) {
+                // Invalidate first: an interrupted copy must never look complete.
+                deleteRequiredFile(getSupportFilesMarkerFile(targetRootFolder));
+                deleteRequiredFile(new File(targetRootFolder, ExtractorAssetState.MARKER));
+                deleteRecursiveIfExists(targetAssetsDir);
+                if (!targetAssetsDir.mkdirs() && !targetAssetsDir.isDirectory()) {
+                    throw new IOException("Failed to create assets folder: " + targetAssetsDir.getAbsolutePath());
+                }
+                AssetCopyUtil.copyAssetsToExternal(this, "assets", targetAssetsDir.getAbsolutePath());
+                Log.i("setupFiles", "Extractor files copied for revision " + extractorVersion);
+            } else {
+                Log.i("setupFiles", "Reusing unchanged extractor files");
+            }
+            ExtractorAssetState.markComplete(targetRootFolder, extractorVersion);
+        } catch (IOException e) {
+            e.printStackTrace();
+            setupFailed = true;
+            runOnUiThread(() -> Toast.makeText(this, "Error copying assets", Toast.LENGTH_LONG).show());
+        }
+
+        // The matching support archives are required and bundled with this APK.
+        boolean markerCurrent = isSupportFilesMarkerCurrent();
+        for (String archive : SUPPORT_ARCHIVES) {
+            File targetOtrFile = new File(targetRootFolder, archive);
+            if (markerCurrent && targetOtrFile.isFile() && targetOtrFile.length() > 0) {
+                continue;
+            }
+            try (InputStream assetIn = getAssets().open(archive)) {
+                targetOtrFile.delete();
+                try (OutputStream out = new FileOutputStream(targetOtrFile)) {
+                    byte[] buffer = new byte[COPY_BUFFER_SIZE];
+                    int read;
+                    while ((read = assetIn.read(buffer)) != -1) {
+                        out.write(buffer, 0, read);
+                    }
+                }
+            } catch (IOException e) {
+                Log.e("setupFiles", "Failed to copy bundled " + archive, e);
+                setupFailed = true;
+            }
+        }
+
+        if (setupFailed) {
+            dismissSetupProgressDialog();
+            showSetupFailure("Required support files could not be copied. Please install a complete APK build.");
+            return;
+        }
+
+        try {
+            writeSupportFilesMarker(targetRootFolder);
+        } catch (IOException e) {
+            Log.e("setupFiles", "Failed to write support files marker", e);
+            dismissSetupProgressDialog();
+            showSetupFailure("Required support files could not be finalized.");
+            return;
+        }
+
+        dismissSetupProgressDialog();
+        setupLatch.countDown();
+    }
+
+    private void showSetupFailure(String message) {
+        setupLatch.countDown();
+        runOnUiThread(() -> new AlertDialog.Builder(this)
+                .setTitle("Setup Failed")
+                .setMessage(message)
+                .setCancelable(false)
+                .setPositiveButton("Close", (dialog, which) -> finish())
+                .show());
+    }
+
+
+
+
+    private native void nativeHandleSelectedFile(String filePath);
+    private native void nativeDialogResult(int result);
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == FILE_PICKER_REQUEST_CODE && resultCode == RESULT_OK && data != null) {
+            // Handle file selection
+            Uri selectedFileUri = data.getData();
+            String fileName = pendingPickerFileName;
+
+            // ComboShip copies picked ROMs to the app cache: they are only read once, by the
+            // extractor, and shouldn't pile up in the user's data folder.
+            File destinationDirectory = getCacheDir();
+            File destinationFile = new File(destinationDirectory, fileName);
+
+            if (selectedFileUri != null && (destinationDirectory.isDirectory() || destinationDirectory.mkdirs())) {
+                destinationFile.delete();
+                try (InputStream in = getContentResolver().openInputStream(selectedFileUri);
+                     OutputStream out = new FileOutputStream(destinationFile)) {
+                    byte[] buffer = new byte[COPY_BUFFER_SIZE];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    nativeHandleSelectedFile(null);
+                    showSetupFailure("The selected file could not be copied into the ComboShip folder.");
+                    return;
+                }
+            } else {
+                showStorageAccessFailure();
+                return;
+            }
+
+            if (destinationFile.exists() && destinationFile.length() > 0) {
+                nativeHandleSelectedFile(destinationFile.getPath());
+            } else {
+                runOnUiThread(() -> Toast.makeText(this, "Failed to copy ROM file", Toast.LENGTH_LONG).show());
+                nativeHandleSelectedFile(null);
+            }
+
+        } else if (requestCode == FILE_PICKER_REQUEST_CODE) {
+            nativeHandleSelectedFile(null);
+        } else if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
+            // Handle MANAGE_EXTERNAL_STORAGE result
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (Environment.isExternalStorageManager()) {
+                    beginSetupOrChooseDataRoot();
+                } else {
+                    showStorageAccessFailure();
+                }
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == STORAGE_PERMISSION_REQUEST_CODE) {
+            if (hasStoragePermission()) {
+                beginSetupOrChooseDataRoot();
+            } else {
+                showStorageAccessFailure();
+            }
+        }
+    }
+
+    public void showAlertDialog(String title, String message, String btn1, String btn2) {
+        runOnUiThread(() -> {
+            AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                    .setTitle(title)
+                    .setMessage(message)
+                    .setCancelable(false)
+                    .setPositiveButton(btn1, (dialog, which) -> nativeDialogResult(0));
+            if (btn2 != null && !btn2.isEmpty()) {
+                builder.setNegativeButton(btn2, (dialog, which) -> nativeDialogResult(1));
+            }
+            AlertDialog dialog = builder.create();
+            // FLAG_NOT_FOCUSABLE prevents stealing SDL window focus so onWindowFocusChanged
+            // is never called — SDL never fires FOCUS_LOST, ImGui keeps gamepad state intact,
+            // SELECT/BACK menu toggle continues to work after dialog dismissal.
+            dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE);
+            dialog.show();
+        });
+    }
+
+    // Name the picked file is copied to inside the data folder. ComboShip's setup screen asks for an
+    // OoT and an MM ROM, so native passes a distinct name for each (see combo/gui/ComboFilePicker.h).
+    private volatile String pendingPickerFileName = "OOT.z64";
+
+    public void openFilePickerAs(String fileName) {
+        pendingPickerFileName = (fileName == null || fileName.isEmpty()) ? "picked.bin" : fileName;
+        openFilePicker();
+    }
+
+    public void openFilePicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.setType("*/*");
+        runOnUiThread(() -> startActivityForResult(intent, 0));
+    }
+
+    public void changeDataFolderFromNative() {
+        showDataRootChooser(true);
+    }
+
+    public String getAndroidVersionFromNative() {
+        String release = Build.VERSION.RELEASE;
+        if (release == null || release.isEmpty()) {
+            return "Android API " + Build.VERSION.SDK_INT;
+        }
+
+        return "Android " + release + " (API " + Build.VERSION.SDK_INT + ")";
+    }
+
+    // Check if external storage is available and writable
+    private boolean isExternalStorageWritable() {
+        String state = Environment.getExternalStorageState();
+        return Environment.MEDIA_MOUNTED.equals(state);
+    }
+
+    private void showStorageAccessFailure() {
+        runOnUiThread(() -> new AlertDialog.Builder(this)
+                .setTitle("Storage Permission Required")
+                .setMessage("The app needs file access to create and update the ComboShip folder. Please grant storage access and try again.")
+                .setCancelable(false)
+                .setPositiveButton("Open Settings", (dialog, which) -> requestStoragePermission())
+                .setNegativeButton("Close", (dialog, which) -> finish())
+                .show());
+    }
+
+    public native void attachController();
+    public native void detachController();
+    // Native method for setting button state
+    public native void setButton(int button, boolean value);
+    public native void setCameraState(int axis, float value);
+    public native void setCameraTouchActive(boolean active);
+    private native void setItemButtonPulse();
+    private native void setItemButtonHeld(boolean held);
+
+    // Native method for setting joystick axis value
+    public native void setAxis(int axis, short value);
+
+    // Signals C++ that the gamepad BACK/SELECT button was pressed, bypassing SDL.
+    public native void nativeGamepadBackPressed();
+    // Injects a directional menu nav key: dir 0=up 1=down 2=left 3=right.
+    public native void nativeMenuNavKey(int dir, boolean pressed);
+
+    public void SetFirstPersonAimingActive(boolean active) {
+        mIsAiming = active;
+    }
+
+    @Override
+    protected void onPause() {
+        if (integratedTouchView != null) integratedTouchView.suspend();
+        // The presentation isn't tied to this activity's window; dismiss it so it doesn't linger with a stale frame.
+        if (dualScreenManager != null) dualScreenManager.stop();
+        super.onPause();
+        setItemButtonHeld(false);
+        mIsAiming = false;
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (integratedTouchView != null) integratedTouchView.resume();
+        if (dualScreenManager != null && !mBrokenLibraries) dualScreenManager.start();
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (dualScreenManager != null) {
+            dualScreenManager.stop();
+            dualScreenManager = null;
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (integratedTouchView == null || !integratedTouchView.cancelEditing()) super.onBackPressed();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            int keyCode = event.getKeyCode();
+            // SDL loses controller tracking after activity transitions; catch BACK at the activity level.
+            boolean isGamepad = (event.getSource() & android.view.InputDevice.SOURCE_GAMEPAD) != 0
+                             || (event.getSource() & android.view.InputDevice.SOURCE_JOYSTICK) != 0;
+            if (keyCode == KeyEvent.KEYCODE_BUTTON_SELECT ||
+                    (keyCode == KeyEvent.KEYCODE_BACK && isGamepad)) {
+                nativeGamepadBackPressed();
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private Button button1, button2, button3, button4;
+    private Button buttonA, buttonB, buttonX, buttonY;
+    private Button buttonDpadUp, buttonDpadDown, buttonDpadLeft, buttonDpadRight;
+    private Button buttonLB, buttonRB, buttonZL, buttonZR, buttonStart, buttonBack;
+    private Button buttonToggle;
+    private FrameLayout leftJoystick;
+    private ImageView leftJoystickKnob;
+    private View overlayView;
+    private ViewGroup buttonGroup;
+    private int leftStickPointerId = MotionEvent.INVALID_POINTER_ID;
+    private int rightStickPointerId = MotionEvent.INVALID_POINTER_ID;
+    private float leftStickStartX;
+    private float leftStickStartY;
+    private float leftStickFixedX = Float.NaN;
+    private float leftStickFixedY = Float.NaN;
+    private float rightStickStartX;
+    private float rightStickStartY;
+    private boolean touchControlsMenuVisible = false;
+    private IntegratedTouchView integratedTouchView;
+    private boolean integratedLookHeld;
+    native int integratedTouchState();
+    native int[] integratedTouchBindings(int mode);
+    native void integratedTouchButton(int mask, boolean down);
+    native void integratedTouchStick(int x, int y);
+    native void integratedTouchReset();
+    native void integratedTouchLayout(float[] anchors, boolean active, boolean naviUtilityIcon);
+
+    public void setIntegratedTouchFromNative(int mode, float scale, float opacity, boolean transparentSticks, boolean floatingRight) {
+        preferences.edit().putInt("integratedTouchMode", Math.max(0, Math.min(3, mode)))
+                .putFloat("integratedTouchScale", scale).putFloat("integratedTouchOpacity", opacity)
+                .putBoolean("touchTransparentSticks", transparentSticks)
+                .putBoolean("touchRightStickFloating", floatingRight).apply();
+        runOnUiThread(this::applyTouchControlsVisibility);
+    }
+    public void editIntegratedTouchFromNative() {
+        runOnUiThread(() -> {
+            if (preferences.getInt("integratedTouchMode", 0) == 0 ||
+                    preferences.getBoolean(PREF_TOUCH_CONTROLS_DISABLED, TOUCH_CONTROLS_DISABLED_DEFAULT)) {
+                Toast.makeText(this, "Select an integrated touch preset and enable touch controls first.", Toast.LENGTH_LONG).show();
+            } else if (integratedTouchView != null) integratedTouchView.startEditing();
+        });
+    }
+    void integratedMenuButton(int mask, boolean down) {
+        int direction = mask == 0x800 ? 0 : mask == 0x400 ? 1 : mask == 0x200 ? 2 :
+                mask == 0x100 ? 3 : mask == 0x8000 ? 4 : mask == 0x4000 ? 5 : -1;
+        if (direction >= 0) nativeMenuNavKey(direction, down);
+    }
+    void integratedLook(float x, float y, boolean active) {
+        if (!active) { integratedLookHeld = false; resetRightTouch(); return; }
+        if (mIsAiming) {
+            if (!integratedLookHeld) { setItemButtonPulse(); setItemButtonHeld(true); }
+            setAxis(ControllerButtons.AXIS_RX, (short) 0);
+            setAxis(ControllerButtons.AXIS_RY, (short) 0);
+            setCameraTouchActive(true);
+            setCameraState(0, x * 170); setCameraState(1, y * 170);
+        } else {
+            setCameraTouchActive(false); setCameraState(0, 0); setCameraState(1, 0);
+            setAxis(ControllerButtons.AXIS_RX, (short)(x * Short.MAX_VALUE));
+            setAxis(ControllerButtons.AXIS_RY, (short)(y * Short.MAX_VALUE));
+        }
+        integratedLookHeld = true;
+    }
+
+    // Function to set up the controller overlay (inflate layout and initialize buttons)
+    private void setupControllerOverlay() {
+        // Inflate the touchcontrol_overlay layout
+        LayoutInflater inflater = (LayoutInflater) getSystemService(LAYOUT_INFLATER_SERVICE);
+        overlayView = inflater.inflate(R.layout.touchcontrol_overlay, null);
+
+        // Set layout params for overlayView to control positioning and sizing
+        FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        );
+        overlayView.setLayoutParams(layoutParams);
+        // Add overlay view to the main layout (you may need to add it to a container like FrameLayout)
+        ViewGroup view = (ViewGroup) findViewById(android.R.id.content);
+        view.addView(overlayView);
+        view.setKeepScreenOn(true);
+
+        buttonGroup = overlayView.findViewById(R.id.button_group);
+
+        buttonA = overlayView.findViewById(R.id.buttonA);
+        buttonB = overlayView.findViewById(R.id.buttonB);
+        buttonX = overlayView.findViewById(R.id.buttonX);
+        buttonY = overlayView.findViewById(R.id.buttonY);
+        applyTouchFaceButtonLayout(preferences.getInt(
+                PREF_TOUCH_FACE_BUTTON_LAYOUT, TOUCH_FACE_BUTTON_LAYOUT_ABXY));
+
+        buttonDpadUp = overlayView.findViewById(R.id.buttonDpadUp);
+        buttonDpadDown = overlayView.findViewById(R.id.buttonDpadDown);
+        buttonDpadLeft = overlayView.findViewById(R.id.buttonDpadLeft);
+        buttonDpadRight = overlayView.findViewById(R.id.buttonDpadRight);
+
+        buttonLB = overlayView.findViewById(R.id.buttonLB);
+        buttonRB = overlayView.findViewById(R.id.buttonRB);
+        buttonZL = overlayView.findViewById(R.id.buttonZL);
+        buttonZR = overlayView.findViewById(R.id.buttonZR);
+
+        buttonStart = overlayView.findViewById(R.id.buttonStart);
+        buttonBack = overlayView.findViewById(R.id.buttonBack);
+
+        buttonToggle = overlayView.findViewById(R.id.buttonToggle);
+
+        // Initialize joysticks and joystick knobs from the inflated layout
+        leftJoystick = overlayView.findViewById(R.id.left_joystick);
+        leftJoystickKnob = overlayView.findViewById(R.id.left_joystick_knob);
+
+        FrameLayout leftScreenArea = overlayView.findViewById(R.id.left_screen_area);
+        FrameLayout rightScreenArea = overlayView.findViewById(R.id.right_screen_area);
+
+        setupCButtons(buttonDpadUp, ControllerButtons.BUTTON_DPAD_UP);
+        setupCButtons(buttonDpadDown, ControllerButtons.BUTTON_DPAD_DOWN);
+        setupCButtons(buttonDpadLeft, ControllerButtons.BUTTON_DPAD_LEFT);
+        setupCButtons(buttonDpadRight, ControllerButtons.BUTTON_DPAD_RIGHT);
+
+        addTouchListener(buttonLB, ControllerButtons.BUTTON_LB);
+        addTouchListener(buttonRB, ControllerButtons.BUTTON_RB);
+        addTouchListener(buttonZL, ControllerButtons.AXIS_LT);
+        addTouchListener(buttonZR, ControllerButtons.AXIS_RT);
+
+        addTouchListener(buttonStart, ControllerButtons.BUTTON_START);
+        // BACK uses nativeGamepadBackPressed directly; setButton(BUTTON_BACK) feeds ImGuiKey_GamepadBack, unreliable when SDL Gamepads list is empty.
+        buttonBack.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                nativeGamepadBackPressed();
+            }
+            return true;
+        });
+
+
+        setupFloatingJoystick(leftScreenArea);
+        setupLookAround(rightScreenArea);
+
+        setupToggleButton(buttonToggle,buttonGroup);
+        // ComboShip: the integrated touch HUD's native half lives in the SoH fork's TouchHud.cpp,
+        // which ComboShip doesn't carry yet, so the view is not created (every use is null-checked).
+        applyTouchLeftStickMode();
+        applyTouchControlsVisibility();
+
+        // Exclude Back/Start from gesture nav zones (they sit at screen edges in landscape).
+        // Must be called on each button in its own local coordinates.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ViewTreeObserver.OnGlobalLayoutListener gestureListener = new ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override
+                public void onGlobalLayout() {
+                    overlayView.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                    Rect selfRect = new Rect(0, 0, buttonBack.getWidth(), buttonBack.getHeight());
+                    buttonBack.setSystemGestureExclusionRects(Arrays.asList(selfRect));
+                    selfRect = new Rect(0, 0, buttonStart.getWidth(), buttonStart.getHeight());
+                    buttonStart.setSystemGestureExclusionRects(Arrays.asList(selfRect));
+                }
+            };
+            overlayView.getViewTreeObserver().addOnGlobalLayoutListener(gestureListener);
+        }
+
+    }
+
+    public void setTouchControlsDisabledFromNative(boolean disabled) {
+        preferences.edit().putBoolean(PREF_TOUCH_CONTROLS_DISABLED, disabled).apply();
+        runOnUiThread(this::applyTouchControlsVisibility);
+    }
+
+    public void setTouchFaceButtonLayoutFromNative(int layout) {
+        int normalizedLayout = layout >= TOUCH_FACE_BUTTON_LAYOUT_ABXY &&
+                layout <= TOUCH_FACE_BUTTON_LAYOUT_GAMECUBE
+                ? layout : TOUCH_FACE_BUTTON_LAYOUT_ABXY;
+        preferences.edit().putInt(PREF_TOUCH_FACE_BUTTON_LAYOUT, normalizedLayout).apply();
+        runOnUiThread(() -> applyTouchFaceButtonLayout(normalizedLayout));
+    }
+
+    public void setTouchLeftStickFloatingFromNative(boolean floating) {
+        preferences.edit().putBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, floating).apply();
+        runOnUiThread(() -> { applyTouchLeftStickMode(); applyTouchControlsVisibility(); });
+    }
+
+    public void setTouchControlsMenuVisibleFromNative(boolean visible) {
+        runOnUiThread(() -> {
+            touchControlsMenuVisible = visible;
+            applyTouchControlsVisibility();
+        });
+    }
+
+    private void applyTouchLeftStickMode() {
+        if (leftJoystick == null) {
+            return;
+        }
+        boolean floating = preferences.getBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, true);
+        if (!floating && !Float.isNaN(leftStickFixedX)) {
+            leftJoystick.setX(leftStickFixedX);
+            leftJoystick.setY(leftStickFixedY);
+            leftJoystickKnob.setX(leftJoystick.getWidth() / 2.0f - leftJoystickKnob.getWidth() / 2.0f);
+            leftJoystickKnob.setY(leftJoystick.getHeight() / 2.0f - leftJoystickKnob.getHeight() / 2.0f);
+        }
+        leftJoystick.setVisibility(floating ? View.INVISIBLE : View.VISIBLE);
+    }
+
+    private void applyTouchFaceButtonLayout(int layout) {
+        if (buttonA == null || buttonB == null || buttonX == null || buttonY == null) {
+            return;
+        }
+
+        FrameLayout actionButtonCluster = overlayView.findViewById(R.id.action_button_cluster);
+        if (layout == TOUCH_FACE_BUTTON_LAYOUT_GAMECUBE) {
+            setViewSize(actionButtonCluster, 200, 170);
+            configureFaceButton(buttonA, 70, 70, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 20, 0, 0, 20);
+            configureFaceButton(buttonB, 46, 46, Gravity.BOTTOM | Gravity.START, 30, 0, 0, 20);
+            configureFaceButton(buttonX, 46, 46, Gravity.TOP | Gravity.END, 0, 37, 0, 0);
+            configureFaceButton(buttonY, 46, 46, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 15, 0, 0);
+        } else if (layout == TOUCH_FACE_BUTTON_LAYOUT_BAYX) {
+            setViewSize(actionButtonCluster, 132, 132);
+            configureFaceButton(buttonA, 44, 44, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0);
+            configureFaceButton(buttonB, 44, 44, Gravity.CENTER_VERTICAL | Gravity.END, 0, 0, 0, 0);
+            configureFaceButton(buttonX, 44, 44, Gravity.CENTER_VERTICAL | Gravity.START, 0, 0, 0, 0);
+            configureFaceButton(buttonY, 44, 44, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0);
+        } else {
+            setViewSize(actionButtonCluster, 132, 132);
+            configureFaceButton(buttonB, 44, 44, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0);
+            configureFaceButton(buttonA, 44, 44, Gravity.CENTER_VERTICAL | Gravity.END, 0, 0, 0, 0);
+            configureFaceButton(buttonY, 44, 44, Gravity.CENTER_VERTICAL | Gravity.START, 0, 0, 0, 0);
+            configureFaceButton(buttonX, 44, 44, Gravity.TOP | Gravity.CENTER_HORIZONTAL, 0, 0, 0, 0);
+        }
+
+        // Layout selection only moves the buttons. A button displaying a letter must
+        // always emit that same logical SDL button, regardless of its screen position.
+        addTouchListener(buttonA, ControllerButtons.BUTTON_A);
+        addTouchListener(buttonB, ControllerButtons.BUTTON_B);
+        addTouchListener(buttonX, ControllerButtons.BUTTON_X);
+        addTouchListener(buttonY, ControllerButtons.BUTTON_Y);
+    }
+
+    private void configureFaceButton(Button button, int widthDp, int heightDp, int gravity,
+                                     int marginStartDp, int marginTopDp,
+                                     int marginEndDp, int marginBottomDp) {
+        FrameLayout.LayoutParams params = (FrameLayout.LayoutParams) button.getLayoutParams();
+        params.width = dpToPixels(widthDp);
+        params.height = dpToPixels(heightDp);
+        params.gravity = gravity;
+        int marginStart = dpToPixels(marginStartDp);
+        int marginEnd = dpToPixels(marginEndDp);
+        params.setMargins(marginStart, dpToPixels(marginTopDp), marginEnd, dpToPixels(marginBottomDp));
+        params.setMarginStart(marginStart);
+        params.setMarginEnd(marginEnd);
+        button.setLayoutParams(params);
+    }
+
+    private void setViewSize(View view, int widthDp, int heightDp) {
+        ViewGroup.LayoutParams params = view.getLayoutParams();
+        params.width = dpToPixels(widthDp);
+        params.height = dpToPixels(heightDp);
+        view.setLayoutParams(params);
+    }
+
+    private int dpToPixels(float dp) {
+        return Math.round(dp * getResources().getDisplayMetrics().density);
+    }
+
+    private void setTouchButtonPressed(Button button, boolean pressed) {
+        button.setPressed(pressed);
+        float scale = pressed ? 0.92f : 1.0f;
+        button.animate().scaleX(scale).scaleY(scale).setDuration(60).start();
+    }
+
+    private void applyTouchControlsVisibility() {
+        if (overlayView == null) {
+            return;
+        }
+
+        boolean touchControlsDisabled = preferences.getBoolean(PREF_TOUCH_CONTROLS_DISABLED, TOUCH_CONTROLS_DISABLED_DEFAULT);
+        boolean transparentSticks = preferences.getBoolean("touchTransparentSticks", false);
+        if (leftJoystick != null && leftJoystick.getBackground() != null) {
+            leftJoystick.getBackground().mutate().setAlpha(
+                    transparentSticks || preferences.getBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, true) ? 0 : 255);
+        }
+        int integratedMode = preferences.getInt("integratedTouchMode", 0);
+        if (integratedTouchView != null) {
+            integratedTouchView.configure(integratedMode, !touchControlsDisabled,
+                    preferences.getBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, true),
+                    preferences.getBoolean("touchRightStickFloating", true),
+                    preferences.getFloat("integratedTouchScale", 1),
+                    preferences.getFloat("integratedTouchOpacity", .55f), transparentSticks);
+            if (integratedMode != 0) {
+                overlayView.setVisibility(View.GONE);
+                DisableTouchArea();
+                return;
+            }
+        }
+        overlayView.setVisibility(touchControlsDisabled ? View.GONE : View.VISIBLE);
+
+        if (buttonGroup != null) {
+            boolean controlsHidden = preferences.getBoolean(PREF_TOUCH_CONTROLS_HIDDEN, false);
+            buttonGroup.setVisibility(controlsHidden ? View.INVISIBLE : View.VISIBLE);
+            if (controlsHidden || touchControlsDisabled || touchControlsMenuVisible) {
+                DisableTouchArea();
+                overlayView.setOnTouchListener(null);
+            } else {
+                EnableTouchArea();
+                overlayView.setOnTouchListener((view, e) -> true);
+            }
+        }
+
+        if (buttonToggle != null) {
+            boolean toggleVisible = preferences.getBoolean("toggleButtonVisible", true);
+            buttonToggle.setVisibility(!touchControlsDisabled && toggleVisible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void setupToggleButton(Button button, ViewGroup uiGroup){
+        button.setOnClickListener(v -> {
+            boolean currentlyHidden = uiGroup.getVisibility() != View.VISIBLE;
+            preferences.edit().putBoolean(PREF_TOUCH_CONTROLS_HIDDEN, !currentlyHidden).apply();
+            applyTouchControlsVisibility();
+        });
+    }
+
+    // Function to set a touch listener for each button
+    private void addTouchListener(Button button, int buttonNum) {
+        // dir>=4: face button nav keys (4=A/select, 5=B/back). -1 = no nav injection.
+        int navDir = (buttonNum == ControllerButtons.BUTTON_A) ? 4
+                   : (buttonNum == ControllerButtons.BUTTON_B) ? 5 : -1;
+        button.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        setButton(buttonNum, true);
+                        if (navDir >= 0) nativeMenuNavKey(navDir, true);
+                        setTouchButtonPressed(button, true);
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        setButton(buttonNum, false);
+                        if (navDir >= 0) nativeMenuNavKey(navDir, false);
+                        setTouchButtonPressed(button, false);
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        setButton(buttonNum, false);
+                        if (navDir >= 0) nativeMenuNavKey(navDir, false);
+                        setTouchButtonPressed(button, false);
+                        return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    private void setupCButtons(Button button, int dpadButton) {
+        button.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getAction()) {
+                    case MotionEvent.ACTION_DOWN:
+                        setButton(dpadButton, true);
+                        nativeMenuNavKey(dpadButton - ControllerButtons.BUTTON_DPAD_UP, true);
+                        setTouchButtonPressed(button, true);
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        setButton(dpadButton, false);
+                        nativeMenuNavKey(dpadButton - ControllerButtons.BUTTON_DPAD_UP, false);
+                        setTouchButtonPressed(button, false);
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        setButton(dpadButton, false);
+                        nativeMenuNavKey(dpadButton - ControllerButtons.BUTTON_DPAD_UP, false);
+                        setTouchButtonPressed(button, false);
+                        return true;
+                }
+                return false;
+            }
+        });
+    }
+
+    boolean TouchAreaEnabled = true;
+
+    void DisableTouchArea(){
+        TouchAreaEnabled = false;
+        resetLeftStick();
+        resetRightTouch();
+    }
+    void EnableTouchArea(){
+        TouchAreaEnabled = true;
+        applyTouchLeftStickMode();
+    }
+
+    void SetToggleButtonVisible(boolean visible) {
+        runOnUiThread(() -> {
+            preferences.edit().putBoolean("toggleButtonVisible", visible).apply();
+            applyTouchControlsVisibility();
+        });
+    }
+
+    private void setupFloatingJoystick(FrameLayout touchArea) {
+        final float maxRadius = dpToPixels(51);
+        leftJoystick.post(() -> {
+            leftStickFixedX = leftJoystick.getX();
+            leftStickFixedY = leftJoystick.getY();
+            applyTouchLeftStickMode();
+        });
+        touchArea.setOnTouchListener((view, event) -> {
+            if (!TouchAreaEnabled) {
+                return false;
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                    boolean floating = preferences.getBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, true);
+                    if (floating) {
+                        leftStickStartX = event.getX();
+                        leftStickStartY = event.getY();
+                        leftJoystick.setX(leftStickStartX - leftJoystick.getWidth() / 2.0f);
+                        leftJoystick.setY(leftStickStartY - leftJoystick.getHeight() / 2.0f);
+                    } else {
+                        leftStickStartX = leftJoystick.getX() + leftJoystick.getWidth() / 2.0f;
+                        leftStickStartY = leftJoystick.getY() + leftJoystick.getHeight() / 2.0f;
+                    }
+                    leftJoystickKnob.setX(leftJoystick.getWidth() / 2.0f - leftJoystickKnob.getWidth() / 2.0f);
+                    leftJoystickKnob.setY(leftJoystick.getHeight() / 2.0f - leftJoystickKnob.getHeight() / 2.0f);
+                    leftJoystick.setVisibility(View.VISIBLE);
+                    return true;
+                case MotionEvent.ACTION_MOVE:
+                    float deltaX = event.getX() - leftStickStartX;
+                    float deltaY = event.getY() - leftStickStartY;
+                    float distance = (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                    if (distance > maxRadius && distance > 0.0f) {
+                        float scale = maxRadius / distance;
+                        deltaX *= scale;
+                        deltaY *= scale;
+                    }
+                    leftJoystickKnob.setX(leftJoystick.getWidth() / 2.0f + deltaX -
+                            leftJoystickKnob.getWidth() / 2.0f);
+                    leftJoystickKnob.setY(leftJoystick.getHeight() / 2.0f + deltaY -
+                            leftJoystickKnob.getHeight() / 2.0f);
+                    setAxis(ControllerButtons.AXIS_LX, (short) (deltaX / maxRadius * Short.MAX_VALUE));
+                    setAxis(ControllerButtons.AXIS_LY, (short) (deltaY / maxRadius * Short.MAX_VALUE));
+                    return true;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    setAxis(ControllerButtons.AXIS_LX, (short) 0);
+                    setAxis(ControllerButtons.AXIS_LY, (short) 0);
+                    if (preferences.getBoolean(PREF_TOUCH_LEFT_STICK_FLOATING, true)) {
+                        leftJoystick.setVisibility(View.INVISIBLE);
+                    }
+                    return true;
+                default:
+                    return true;
+            }
+        });
+    }
+
+    private void resetLeftStick() {
+        leftStickPointerId = MotionEvent.INVALID_POINTER_ID;
+        setAxis(ControllerButtons.AXIS_LX, (short) 0);
+        setAxis(ControllerButtons.AXIS_LY, (short) 0);
+        leftJoystick.setVisibility(View.INVISIBLE);
+    }
+
+    private void resetRightTouch() {
+        rightStickPointerId = MotionEvent.INVALID_POINTER_ID;
+        setAxis(ControllerButtons.AXIS_RX, (short) 0);
+        setAxis(ControllerButtons.AXIS_RY, (short) 0);
+        setCameraTouchActive(false);
+        setCameraState(0, 0.0f);
+        setCameraState(1, 0.0f);
+        if (mIsAiming) {
+            setItemButtonHeld(false);
+        }
+    }
+
+    private void setupLookAround(FrameLayout rightScreenArea) {
+        rightScreenArea.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                if (!TouchAreaEnabled) {
+                    return false;
+                }
+
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                    case MotionEvent.ACTION_POINTER_DOWN: {
+                        if (rightStickPointerId == MotionEvent.INVALID_POINTER_ID) {
+                            int pointerIndex = event.getActionIndex();
+                            rightStickPointerId = event.getPointerId(pointerIndex);
+                            boolean floating = preferences.getBoolean("touchRightStickFloating", true);
+                            rightStickStartX = floating ? event.getX(pointerIndex) : v.getWidth() / 2.0f;
+                            rightStickStartY = floating ? event.getY(pointerIndex) : v.getHeight() * .7f;
+                        }
+                        if (mIsAiming) {
+                            setCameraTouchActive(true);
+                            setItemButtonPulse();
+                            setItemButtonHeld(true);
+                        }
+                        return true;
+                    }
+
+                    case MotionEvent.ACTION_MOVE: {
+                        int pointerIndex = event.findPointerIndex(rightStickPointerId);
+                        if (pointerIndex >= 0) {
+                            float deltaX = event.getX(pointerIndex) - rightStickStartX;
+                            float deltaY = event.getY(pointerIndex) - rightStickStartY;
+                            float maxRadius = dpToPixels(51);
+                            float distance = (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                            if (distance > maxRadius && distance > 0.0f) {
+                                float scale = maxRadius / distance;
+                                deltaX *= scale;
+                                deltaY *= scale;
+                            }
+
+                            if (mIsAiming) {
+                                // SOH's item-aiming path also handles the touch-to-fire gesture.
+                                setAxis(ControllerButtons.AXIS_RX, (short) 0);
+                                setAxis(ControllerButtons.AXIS_RY, (short) 0);
+                                setCameraTouchActive(true);
+                                setCameraState(0, deltaX / maxRadius * 170.0f);
+                                setCameraState(1, deltaY / maxRadius * 170.0f);
+                            } else {
+                                // Match 2Ship: use the real virtual right-stick axes so
+                                // controller deadzone, sensitivity, and inversion are shared.
+                                setCameraTouchActive(false);
+                                setCameraState(0, 0.0f);
+                                setCameraState(1, 0.0f);
+                                setAxis(ControllerButtons.AXIS_RX,
+                                        (short) (deltaX / maxRadius * Short.MAX_VALUE));
+                                setAxis(ControllerButtons.AXIS_RY,
+                                        (short) (deltaY / maxRadius * Short.MAX_VALUE));
+                            }
+                        }
+                        return true;
+                    }
+
+                    case MotionEvent.ACTION_POINTER_UP:
+                    case MotionEvent.ACTION_UP:
+                        if (event.getPointerId(event.getActionIndex()) == rightStickPointerId) {
+                            resetRightTouch();
+                        }
+                        return true;
+                    case MotionEvent.ACTION_CANCEL:
+                        resetRightTouch();
+                        return true;
+                    default:
+                        return true;
+                }
+            }
+        });
+    }
+
+
+
+
+
+    // Function to set joystick movement with reset to center when not touched
+    private void setupJoystick(FrameLayout joystickLayout, ImageView joystickKnob, boolean isLeft) {
+        joystickLayout.post(() -> {
+            // Calculate the joystick center once, before any events
+            final float joystickCenterX = joystickLayout.getWidth() / 2f;
+            final float joystickCenterY = joystickLayout.getHeight() / 2f;
+
+            joystickLayout.setOnTouchListener(new View.OnTouchListener() {
+                @Override
+                public boolean onTouch(View v, MotionEvent event) {
+                    switch (event.getAction()) {
+                        case MotionEvent.ACTION_DOWN:
+                        case MotionEvent.ACTION_MOVE:
+                            // Calculate the joystick movement and move the knob
+                            float deltaX = event.getX() - joystickCenterX;
+                            float deltaY = event.getY() - joystickCenterY;
+
+                            // Clamp the joystick movement to prevent it from going outside the area
+                            float maxRadius = joystickLayout.getWidth() / 2f - joystickKnob.getWidth() / 2f;
+                            float distance = (float) Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+                            if (distance > maxRadius) {
+                                float scale = maxRadius / distance;
+                                deltaX *= scale;
+                                deltaY *= scale;
+                            }
+
+                            joystickKnob.setX(joystickCenterX + deltaX - joystickKnob.getWidth() / 2f);
+                            joystickKnob.setY(joystickCenterY + deltaY - joystickKnob.getHeight() / 2f);
+
+                            // Send joystick values to native C code
+                            short x = (short) (deltaX / maxRadius * Short.MAX_VALUE);
+                            short y = (short) (deltaY / maxRadius * Short.MAX_VALUE);
+
+                            // Send X-axis and Y-axis values
+                            setAxis(isLeft ? ControllerButtons.AXIS_LX : ControllerButtons.AXIS_RX, x); // X-axis
+                            setAxis(isLeft ? ControllerButtons.AXIS_LY : ControllerButtons.AXIS_RY, y); // Y-axis
+                            break;
+
+                        case MotionEvent.ACTION_UP:
+                        case MotionEvent.ACTION_CANCEL:
+                            // Reset joystick knob to the center position (ensure it's placed correctly)
+                            joystickKnob.setX(joystickCenterX - joystickKnob.getWidth() / 2f);
+                            joystickKnob.setY(joystickCenterY - joystickKnob.getHeight() / 2f);
+
+                            // Reset joystick values to 0 when released or canceled
+                            setAxis(isLeft ? ControllerButtons.AXIS_LX : ControllerButtons.AXIS_RX, (short) 0); // X-axis
+                            setAxis(isLeft ? ControllerButtons.AXIS_LY : ControllerButtons.AXIS_RY, (short) 0); // Y-axis
+                            break;
+                    }
+                    return true;
+                }
+            });
+        });
+
+
+    }
+
+    public void startRumble(int lowIntensity, int highIntensity) {
+        int amplitude = Math.max(lowIntensity, highIntensity);
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD &&
+                (sources & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK) continue;
+            Vibrator dv = device.getVibrator();
+            if (dv != null && dv.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    dv.vibrate(VibrationEffect.createOneShot(RUMBLE_MAX_DURATION_MS, amplitude > 0 ? amplitude : VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    dv.vibrate(RUMBLE_MAX_DURATION_MS);
+                }
+                return;
+            }
+        }
+        Vibrator sv = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (sv != null && sv.hasVibrator()) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                sv.vibrate(VibrationEffect.createOneShot(RUMBLE_MAX_DURATION_MS, amplitude > 0 ? amplitude : VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                sv.vibrate(RUMBLE_MAX_DURATION_MS);
+            }
+        }
+    }
+
+    public void stopRumble() {
+        for (int id : InputDevice.getDeviceIds()) {
+            InputDevice device = InputDevice.getDevice(id);
+            if (device == null) continue;
+            int sources = device.getSources();
+            if ((sources & InputDevice.SOURCE_GAMEPAD) != InputDevice.SOURCE_GAMEPAD &&
+                (sources & InputDevice.SOURCE_JOYSTICK) != InputDevice.SOURCE_JOYSTICK) continue;
+            Vibrator dv = device.getVibrator();
+            if (dv != null && dv.hasVibrator()) dv.cancel();
+        }
+        Vibrator sv = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        if (sv != null) sv.cancel();
+    }
+
+}

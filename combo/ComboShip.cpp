@@ -82,6 +82,11 @@ static void ComboTerminateHandler() {
 #ifdef __APPLE__
 #include <mach-o/dyld.h> // _NSGetExecutablePath (see ComboExeDir)
 #endif
+#ifdef __ANDROID__
+#include <android/log.h>
+#include <jni.h>
+#include <unistd.h>
+#endif
 
 #ifdef _WIN32
 // Last-chance crash capture for the post-teardown window (FreeLibrary / CRT exit / static dtors),
@@ -3022,6 +3027,78 @@ static int LauncherValidateShipConfig(const char* path) {
     return (path && LoadJsonObject(path, j) && j.contains("CVars")) ? 1 : 0;
 }
 
+#ifdef __ANDROID__
+// ---------- Android bootstrap ----------
+
+// Android discards stdout/stderr; the launcher and both games log through them, so forward each
+// line to logcat (tag "ComboShip").
+static void ComboAndroidRedirectStdio() {
+    static int pipeFds[2];
+    if (pipe(pipeFds) != 0) {
+        return;
+    }
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+    setvbuf(stderr, nullptr, _IONBF, 0);
+    dup2(pipeFds[1], STDOUT_FILENO);
+    dup2(pipeFds[1], STDERR_FILENO);
+    std::thread([] {
+        char buf[1024];
+        std::string line;
+        ssize_t n;
+        while ((n = read(pipeFds[0], buf, sizeof(buf))) > 0) {
+            line.append(buf, static_cast<size_t>(n));
+            size_t nl;
+            while ((nl = line.find('\n')) != std::string::npos) {
+                __android_log_write(ANDROID_LOG_INFO, "ComboShip", line.substr(0, nl).c_str());
+                line.erase(0, nl + 1);
+            }
+        }
+    }).detach();
+}
+
+// Java (MainActivity) owns the storage permission prompt, the data-folder choice and copying the
+// bundled support files. Block until it's done, then make that folder the runtime root the way
+// the Linux AppImage does: SHIP_HOME (read by ComboRando::DataDir and, on Android, libultraship)
+// plus the working directory. Returns false if setup failed; MainActivity is showing why.
+static bool ComboAndroidWaitForSetup() {
+    auto* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
+    auto activity = static_cast<jobject>(SDL_AndroidGetActivity());
+    if (!env || !activity) {
+        return false;
+    }
+    std::string root;
+    jclass cls = env->GetObjectClass(activity);
+    jmethodID wait = env->GetStaticMethodID(cls, "waitForSetupFromNative", "()V");
+    jmethodID getPath = env->GetStaticMethodID(cls, "getDataRootPathFromNative", "()Ljava/lang/String;");
+    if (wait && getPath && !env->ExceptionCheck()) {
+        env->CallStaticVoidMethod(cls, wait);
+        auto path = env->ExceptionCheck() ? nullptr : static_cast<jstring>(env->CallStaticObjectMethod(cls, getPath));
+        if (path && !env->ExceptionCheck()) {
+            if (const char* utf = env->GetStringUTFChars(path, nullptr)) {
+                root = utf;
+                env->ReleaseStringUTFChars(path, utf);
+            }
+            env->DeleteLocalRef(path);
+        }
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        root.clear();
+    }
+    env->DeleteLocalRef(cls);
+    env->DeleteLocalRef(activity);
+    std::error_code ec;
+    if (root.empty() || !std::filesystem::is_directory(root, ec)) {
+        std::cerr << "[ComboShip] Android setup did not produce a data folder." << std::endl;
+        return false;
+    }
+    setenv("SHIP_HOME", root.c_str(), 1);
+    std::filesystem::current_path(root, ec);
+    std::cout << "[ComboShip] Android data folder: " << root << (ec ? " (chdir failed)" : "") << std::endl;
+    return !ec;
+}
+#endif
+
 // ---------- Entry point ----------
 
 int main(int argc, char** argv) {
@@ -3038,6 +3115,13 @@ int main(int argc, char** argv) {
 #endif
 
     std::set_terminate(ComboTerminateHandler);
+
+#ifdef __ANDROID__
+    ComboAndroidRedirectStdio();
+    if (!ComboAndroidWaitForSetup()) {
+        return 1;
+    }
+#endif
 
     // --- 1. Load DLLs ---
 

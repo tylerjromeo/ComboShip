@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
+#if defined(__ANDROID__)
+// Storage Access Framework picker via MainActivity (combo/gui/ComboFilePickerAndroid.cpp).
+#elif defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <commdlg.h>
@@ -20,11 +22,15 @@
 
 namespace ComboFilePicker {
 
+#ifdef __ANDROID__
+std::string PickFileAndroid();
+#endif
+
 // False only on a Linux system with none of pfd's dialog helpers (zenity/kdialog/...) installed;
 // callers disable Browse and point at the alternative (drag & drop / Skip) instead of leaving a
 // button that silently no-ops.
 inline bool Available() {
-#ifdef _WIN32
+#if defined(__ANDROID__) || defined(_WIN32)
     return true;
 #else
     static const bool sAvailable = pfd::settings::available();
@@ -35,7 +41,12 @@ inline bool Available() {
 // Native open-file dialog. winFilter is GetOpenFileNameA's double-NUL filter string; pfdFilters
 // is pfd's {label, pattern, ...} list. Returns "" if cancelled or no dialog helper is available.
 inline std::string PickFile(const char* title, const char* winFilter, const std::vector<std::string>& pfdFilters) {
-#ifdef _WIN32
+#if defined(__ANDROID__)
+    (void)title;
+    (void)winFilter;
+    (void)pfdFilters;
+    return PickFileAndroid();
+#elif defined(_WIN32)
     (void)pfdFilters;
     char file[MAX_PATH] = { 0 };
     OPENFILENAMEA ofn = { 0 };

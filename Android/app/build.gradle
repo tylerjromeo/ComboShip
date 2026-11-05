@@ -1,0 +1,158 @@
+// ComboShip Android. Adapted from linkzenic/Shipwright-Ports Android/app/build.gradle (SoH 9.3.1-android.3).
+//
+// The Java package stays com.dishii.soh: libultraship's Android JNI entry points (AndroidInput.cpp,
+// SecondaryScreen.cpp) are named after it. The installed app identity is applicationId below, so
+// ComboShip installs side by side with Ship of Harkinian / 2 Ship 2 Harkinian.
+apply plugin: 'com.android.application'
+
+def androidAppVersionName = "0.3.0-android.1"
+
+// Host-built ComboShip support archives (cmake --build build-host --target GenerateSohOtr Generate2ShipOtr).
+def sohSupportArchive = providers.gradleProperty("sohSupportArchive").orElse("../../soh/soh.o2r")
+def mmSupportArchive = providers.gradleProperty("mmSupportArchive").orElse("../../mm/2ship.o2r")
+
+def nativeArgs = ["-DSDL_SHARED=ON", "-DANDROID_STL=c++_static", "-DHAVE_LD_VERSION_SCRIPT=OFF",
+                  "-DUSE_OPENGLES=ON", "-DANDROID_APP_VERSION_NAME=${androidAppVersionName}"]
+// Every module the launcher loads. AGP only packages the outputs of the targets it builds.
+def nativeTargets = ["ComboShip", "comboui", "soh", "2ship", "libultraship", "SDL2"]
+
+android {
+    ndkVersion "26.0.10792818"
+    namespace 'com.dishii.soh'
+    compileSdkVersion 31
+    buildFeatures {
+        buildConfig = true
+    }
+    defaultConfig {
+        applicationId project.findProperty('comboApplicationId') ?: "com.comboship.android"
+        minSdkVersion 24
+        targetSdkVersion 33
+        versionCode 1
+        versionName androidAppVersionName
+        externalNativeBuild {
+            cmake {
+                arguments(*nativeArgs)
+                targets(*nativeTargets)
+                abiFilters 'arm64-v8a'
+            }
+        }
+    }
+    signingConfigs {
+        release {
+            def releaseStoreFile = project.findProperty('storeFile') ?: System.getenv('ANDROID_KEYSTORE_PATH')
+            if (releaseStoreFile) {
+                storeFile file(releaseStoreFile)
+                storePassword project.findProperty('storePassword') ?: System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias project.findProperty('keyAlias') ?: System.getenv('ANDROID_KEY_ALIAS')
+                keyPassword project.findProperty('keyPassword') ?: System.getenv('ANDROID_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            applicationIdSuffix ".localtest"
+        }
+        release {
+            minifyEnabled false
+            debuggable false
+            jniDebuggable false
+            signingConfig signingConfigs.release
+        }
+    }
+    applicationVariants.all { variant ->
+        tasks["merge${variant.name.capitalize()}Assets"]
+            .dependsOn("externalNativeBuild${variant.name.capitalize()}")
+        variant.outputs.all { output ->
+            outputFileName = "comboship_${variant.buildType.name}_v${variant.versionName}.apk"
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+            version "3.31.5"
+        }
+    }
+    lintOptions {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation 'androidx.core:core:1.7.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
+}
+
+tasks.register("verifyLibultrashipAndroidSupport") {
+    doLast {
+        def contextFile = file("${rootProject.projectDir}/../libultraship/src/ship/Context.cpp")
+        if (!contextFile.text.contains("sAndroidDataRootPath")) {
+            throw new GradleException("The Android data-root support is missing from libultraship.")
+        }
+    }
+}
+
+tasks.configureEach { task ->
+    if (task.name.startsWith("configureCMake") ||
+            task.name.startsWith("buildCMake") ||
+            task.name.startsWith("externalNativeBuild")) {
+        task.dependsOn("verifyLibultrashipAndroidSupport")
+    }
+}
+
+// Extractor inputs, laid out flat exactly like the desktop runtime deploy (combo/CMakeLists.txt):
+// soh's Torch ymls and mm's ZAPD extractor dir merged into assets/, mm's xml into assets/xml/.
+def extractorDirs = ["../../soh/assets/yml": "", "../../mm/assets/extractor": "", "../../mm/assets/xml": "xml"]
+def extractorVersionFile = layout.buildDirectory.file("generated/extractorVersion/extractor.version")
+tasks.register("generateExtractorVersion") {
+    extractorDirs.keySet().each { inputs.dir(it) }
+    outputs.file(extractorVersionFile)
+    doLast {
+        def digest = java.security.MessageDigest.getInstance("SHA-256")
+        byte[] buffer = new byte[65536]
+        extractorDirs.each { dir, prefix ->
+            def root = file(dir).toPath()
+            fileTree(root.toFile()).files.sort { a, b ->
+                root.relativize(a.toPath()).toString() <=> root.relativize(b.toPath()).toString()
+            }.each { asset ->
+                digest.update((prefix + "/" + root.relativize(asset.toPath()).toString().replace('\\', '/')).getBytes("UTF-8"))
+                digest.update((byte) 0)
+                asset.withInputStream { input ->
+                    int count
+                    while ((count = input.read(buffer)) != -1) digest.update(buffer, 0, count)
+                }
+            }
+        }
+        def output = extractorVersionFile.get().asFile
+        output.parentFile.mkdirs()
+        output.text = digest.digest().encodeHex().toString() + "\n"
+    }
+}
+tasks.register("prepareAndroidSupportAssets", Sync) {
+    dependsOn("generateExtractorVersion")
+    into layout.buildDirectory.dir("generated/comboSupportAssets")
+    extractorDirs.each { dir, prefix ->
+        from(dir) { into(prefix.isEmpty() ? "assets" : "assets/" + prefix) }
+    }
+    from("../../gamecontrollerdb.txt")
+    from("src/main/assets/fonts") { into "fonts" }
+    from(extractorVersionFile)
+    from(provider { file(sohSupportArchive.get()) }) { rename { "soh.o2r" } }
+    from(provider { file(mmSupportArchive.get()) }) { rename { "2ship.o2r" } }
+    doFirst {
+        [sohSupportArchive.get(), mmSupportArchive.get()].each { archive ->
+            if (!file(archive).isFile()) {
+                throw new GradleException("Missing ${archive}: run the host GenerateSohOtr / Generate2ShipOtr targets before packaging Android.")
+            }
+        }
+    }
+}
+// Use the producer task, not just its output path, so all asset consumers
+// (including release lint models) inherit the generation dependency.
+android.sourceSets.main.assets.setSrcDirs([tasks.named("prepareAndroidSupportAssets")])
+tasks.configureEach { task ->
+    if ((task.name.startsWith("merge") && task.name.endsWith("Assets")) ||
+            task.name.toLowerCase(java.util.Locale.ROOT).contains("lint")) {
+        task.dependsOn("prepareAndroidSupportAssets")
+    }
+}

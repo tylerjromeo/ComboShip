@@ -41,6 +41,7 @@ set(COMBOUI_SOURCES
     gui/ComboHintTracker.cpp
     gui/ComboTimersWindow.cpp
     gui/ComboCosmeticsSync.cpp
+    gui/ComboFilePickerAndroid.cpp # empty unless __ANDROID__
 )
 add_library(comboui SHARED ${COMBOUI_SOURCES})
 if(NOT ANDROID) # Android only packages lib*.so, so it keeps the prefix there (libcomboui.so).
