@@ -33,7 +33,11 @@ extern SaveContext gSaveContext;
     ((GET_NEWF(save, 0) == 'Z') && (GET_NEWF(save, 1) == 'E') && (GET_NEWF(save, 2) == 'L') && \
      (GET_NEWF(save, 3) == 'D') && (GET_NEWF(save, 4) == 'A') && (GET_NEWF(save, 5) == '3'))
 
-const std::filesystem::path savesFolderPath(Ship::Context::GetPathRelativeToAppDirectory("saves", appShortName));
+// ComboShip: computed on use, not at load time — on Android this library is loaded before
+// SDL's JNI bridge (and the data folder) exist, and resolving the app dir aborts there.
+static std::filesystem::path savesFolderPath() {
+    return Ship::Context::GetPathRelativeToAppDirectory("saves", appShortName);
+}
 
 #ifdef COMBO_BUILD
 #include "ComboExport.h"        // ComboShip: COMBO_EXPORT for MM_InvalidateOwlBlobSlot
@@ -165,15 +169,15 @@ void SaveManager_WriteSaveFile(const std::filesystem::path& fileName, nlohmann::
         // global.json falls through to disk (per-game globals stay separate).
     }
 #endif
-    const std::filesystem::path filePath = savesFolderPath / fileName;
+    const std::filesystem::path filePath = savesFolderPath() / fileName;
 
     // create_directories (plural) makes any missing parent dirs too; create_directory (single) fails
     // silently if a parent is missing, after which the ofstream open below silently no-ops.
     std::error_code ec;
-    std::filesystem::create_directories(savesFolderPath, ec);
+    std::filesystem::create_directories(savesFolderPath(), ec);
     if (ec) {
         SPDLOG_ERROR("[ComboShip] Could not create saves folder {}: {}",
-                     std::filesystem::absolute(savesFolderPath).string(), ec.message());
+                     std::filesystem::absolute(savesFolderPath()).string(), ec.message());
     }
 
     try {
@@ -365,8 +369,8 @@ int SaveManager_LoadSaveFile(int mmFileNum) {
     SPDLOG_INFO("[ComboShip] LoadSaveFile slot {} <- .combosav container (read result={})", mmFileNum, result);
 #else
     SPDLOG_INFO("[ComboShip] LoadSaveFile slot {} -> {} (read result={}, savesFolder={})", mmFileNum,
-                std::filesystem::absolute(savesFolderPath / fileName).string(), result,
-                std::filesystem::absolute(savesFolderPath).string());
+                std::filesystem::absolute(savesFolderPath() / fileName).string(), result,
+                std::filesystem::absolute(savesFolderPath()).string());
 #endif
     if (result != 0) {
         SPDLOG_ERROR("[ComboShip] MM save file {} missing or unreadable (read result={})", fileName, result);
@@ -449,7 +453,7 @@ void SaveManager_DeleteSaveFile(const std::filesystem::path& fileName) {
             return; // backups are never written
     }
 #endif
-    const std::filesystem::path filePath = savesFolderPath / fileName;
+    const std::filesystem::path filePath = savesFolderPath() / fileName;
 
     try {
         if (std::filesystem::exists(filePath)) {
@@ -479,7 +483,7 @@ int SaveManager_ReadSaveFile(const std::filesystem::path& fileName, nlohmann::js
         }
     }
 #endif
-    const std::filesystem::path filePath = savesFolderPath / fileName;
+    const std::filesystem::path filePath = savesFolderPath() / fileName;
 
     if (!std::filesystem::exists(filePath)) {
         return -1;
@@ -525,9 +529,9 @@ void SaveManager_PersistSariaHintsAvailable() {
 }
 
 void SaveManager_MoveInvalidSaveFile(const std::filesystem::path& fileName, const std::string& message) {
-    const std::filesystem::path filePath = savesFolderPath / fileName;
+    const std::filesystem::path filePath = savesFolderPath() / fileName;
     const std::filesystem::path backupFilePath =
-        savesFolderPath / (fileName.stem().string() + "_invalid_" + std::to_string(std::time(nullptr)) + ".json");
+        savesFolderPath() / (fileName.stem().string() + "_invalid_" + std::to_string(std::time(nullptr)) + ".json");
 
     try {
         if (std::filesystem::exists(filePath)) {
@@ -543,17 +547,17 @@ void SaveManager_MoveInvalidSaveFile(const std::filesystem::path& fileName, cons
 // created from OOT, never imported), so the on-disk probe below is vestigial under COMBO_BUILD.
 int SaveManager_GetOpenFileSlot() {
     std::string fileName = "file1.json";
-    if (!std::filesystem::exists(savesFolderPath / fileName)) {
+    if (!std::filesystem::exists(savesFolderPath() / fileName)) {
         return 1;
     }
 
     fileName = "file2.json";
-    if (!std::filesystem::exists(savesFolderPath / fileName)) {
+    if (!std::filesystem::exists(savesFolderPath() / fileName)) {
         return 2;
     }
 
     fileName = "file3.json";
-    if (!std::filesystem::exists(savesFolderPath / fileName)) {
+    if (!std::filesystem::exists(savesFolderPath() / fileName)) {
         return 3;
     }
 

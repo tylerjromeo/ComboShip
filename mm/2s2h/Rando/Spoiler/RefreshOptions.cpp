@@ -7,8 +7,11 @@
 #include <libultraship/libultra/types.h>
 
 std::vector<std::string> Rando::Spoiler::spoilerOptions;
-const std::filesystem::path randomizerFolderPath(Ship::Context::GetPathRelativeToAppDirectory("randomizer",
-                                                                                              appShortName));
+// ComboShip: computed on use, not at load time — on Android this library is loaded before
+// SDL's JNI bridge (and the data folder) exist, and resolving the app dir aborts there.
+static std::filesystem::path randomizerFolderPath() {
+    return Ship::Context::GetPathRelativeToAppDirectory("randomizer", appShortName);
+}
 
 void Rando::Spoiler::SelectSpoiler(s32 index) {
     bool generateNew = (index <= 0) || (index >= (s32)Rando::Spoiler::spoilerOptions.size());
@@ -27,12 +30,12 @@ void Rando::Spoiler::RefreshOptions() {
     s32 spoilerFileIndex = -1;
 
     // ensure the randomizer folder exists
-    if (!std::filesystem::exists(randomizerFolderPath)) {
-        std::filesystem::create_directory(randomizerFolderPath);
+    if (!std::filesystem::exists(randomizerFolderPath())) {
+        std::filesystem::create_directory(randomizerFolderPath());
     }
 
     // Add all files in the randomizer folder to the list of spoiler options
-    for (const auto& entry : std::filesystem::directory_iterator(randomizerFolderPath)) {
+    for (const auto& entry : std::filesystem::directory_iterator(randomizerFolderPath())) {
         if (entry.is_regular_file()) {
             std::string fileName = entry.path().filename().string();
             Rando::Spoiler::spoilerOptions.push_back(fileName);

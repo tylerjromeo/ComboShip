@@ -667,7 +667,11 @@ nlohmann::json voyage3PresetJ = R"(
 )"_json;
 
 std::unordered_map<std::string, std::pair<nlohmann::json, std::set<std::string>>> presets = {};
-const std::filesystem::path presetsFolderPath(Ship::Context::GetPathRelativeToAppDirectory("presets", appShortName));
+// ComboShip: computed on use, not at load time — on Android this library is loaded before
+// SDL's JNI bridge (and the data folder) exist, and resolving the app dir aborts there.
+static std::filesystem::path presetsFolderPath() {
+    return Ship::Context::GetPathRelativeToAppDirectory("presets", appShortName);
+}
 
 void PresetManager_RefreshPresets() {
     presets.clear();
@@ -685,12 +689,12 @@ void PresetManager_RefreshPresets() {
     presets.insert({ "Voyage 3", { voyage3PresetJ, { "Developer Tools", "Enhancements", "Rando" } } });
 
     // ensure the presets folder exists
-    if (!std::filesystem::exists(presetsFolderPath)) {
-        std::filesystem::create_directory(presetsFolderPath);
+    if (!std::filesystem::exists(presetsFolderPath())) {
+        std::filesystem::create_directory(presetsFolderPath());
     }
 
     // Add all files in the presets folder to the list of presets
-    for (const auto& entry : std::filesystem::directory_iterator(presetsFolderPath)) {
+    for (const auto& entry : std::filesystem::directory_iterator(presetsFolderPath())) {
         if (entry.is_regular_file()) {
             std::string fileName = entry.path().filename().string();
             fileName.erase(fileName.find_last_of('.'));
@@ -824,7 +828,7 @@ void PresetManager_CreatePreset(std::string presetName) {
         newJson["CVars"].erase("gWindows");
 
         std::string presetFileName = presetName + ".json";
-        const std::filesystem::path newPresetFilePath = presetsFolderPath / presetFileName;
+        const std::filesystem::path newPresetFilePath = presetsFolderPath() / presetFileName;
         std::ofstream newFileStream(newPresetFilePath);
         newFileStream << newJson.dump(4);
 
@@ -887,7 +891,7 @@ bool PresetManager_HandleFileDropped(char* filePath) {
 
         // Save the spoiler file to the presets folder
         std::string presetFileName = std::filesystem::path(filePath).filename().string();
-        const std::filesystem::path newPresetFilePath = presetsFolderPath / presetFileName;
+        const std::filesystem::path newPresetFilePath = presetsFolderPath() / presetFileName;
         std::filesystem::copy_file(filePath, newPresetFilePath, std::filesystem::copy_options::overwrite_existing);
 
         PresetManager_RefreshPresets();
@@ -906,7 +910,7 @@ void PresetManager_Draw() {
                        "refresh the list.");
     ImGui::PopStyleColor();
     if (UIWidgets::Button("Open Presets Folder", { .size = ImVec2(ImGui::GetContentRegionAvail().x - 42, 0) })) {
-        std::string path = "file:///" + std::filesystem::absolute(presetsFolderPath).string();
+        std::string path = "file:///" + std::filesystem::absolute(presetsFolderPath()).string();
         SDL_OpenURL(path.c_str());
     }
     ImGui::SameLine();
