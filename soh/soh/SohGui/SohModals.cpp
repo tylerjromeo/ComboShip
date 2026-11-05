@@ -1,3 +1,6 @@
+#ifdef COMBO_BUILD
+#include "ComboDualScreen.h"
+#endif
 #include "SohModals.h"
 #include <imgui.h>
 #include <ship/window/Window.h>
@@ -39,7 +42,14 @@ void SohModalWindow::DrawElement() {
             modals.erase(modals.begin());
             closePopup = false;
         }
+#ifdef COMBO_BUILD
+        // ComboShip: modals go with the menu (the second display on a dual-screen handheld).
+        ImGui::SetNextWindowPos(ComboDualScreen::IsActive() ? ComboDualScreen::MenuCenter()
+                                                            : ImGui::GetMainViewport()->GetCenter(),
+                                ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+#else
         ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+#endif
         if (ImGui::BeginPopupModal(curModal.title_.c_str(), NULL,
                                    ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoResize |
                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |

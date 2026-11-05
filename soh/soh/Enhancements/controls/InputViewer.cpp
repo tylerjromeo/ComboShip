@@ -1,3 +1,6 @@
+#ifdef COMBO_BUILD
+#include "ComboDualScreen.h"
+#endif
 #include <libultraship/bridge/consolevariablebridge.h>
 #include "libultraship/libultra/controller.h"
 #include <ship/Context.h>
@@ -115,6 +118,12 @@ void InputViewer::DrawElement() {
 
         ImVec2 mainPos = ImGui::GetWindowPos();
         ImVec2 size = ImGui::GetMainViewport()->WorkSize;
+#ifdef COMBO_BUILD
+        if (ComboDualScreen::IsActive()) { // ComboShip: game display only
+            ImVec2 gamePos;
+            ComboDualScreen::GameRect(gamePos, size);
+        }
+#endif
 
 #ifdef __WIIU__
         const float scale = CVarGetFloat(CVAR_INPUT_VIEWER("Scale"), 1.0f) * 2.0f;

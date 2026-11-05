@@ -1,4 +1,5 @@
 // combo/gui/ComboMenu.cpp
+#include "ComboDualScreen.h"
 #include "ComboMenu.h"
 #include "ComboExport.h"
 #include "ComboMenuModel.h"
@@ -221,9 +222,11 @@ void ComboMenu::DrawElement() {
 
     // Fullscreen overlay covering the viewport work area, matching the old port menu
     // (NoDecoration/NoMove, sized to the viewport, with a translucent backdrop).
-    ImGuiViewport* vp = ImGui::GetMainViewport();
-    ImGui::SetNextWindowPos(vp->WorkPos, ImGuiCond_Always);
-    ImGui::SetNextWindowSize(vp->WorkSize, ImGuiCond_Always);
+    // ComboShip Android: on a dual-screen handheld this is the second display (ComboDualScreen.h).
+    ImVec2 menuAreaPos, menuAreaSize;
+    ComboDualScreen::MenuRect(menuAreaPos, menuAreaSize);
+    ImGui::SetNextWindowPos(menuAreaPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(menuAreaSize, ImGuiCond_Always);
     ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, CVarGetFloat("gSettings.Menu.BackgroundOpacity", 0.85f)));
@@ -234,8 +237,7 @@ void ComboMenu::DrawElement() {
     if (open) {
         // Center an inset menu block over the full-screen backdrop (mirrors SoH DrawElement: 90% /
         // 16:9 cap, centered) instead of filling the viewport edge-to-edge.
-        ImGuiViewport* mvp = ImGui::GetMainViewport();
-        const float ww = mvp->WorkSize.x, wh = mvp->WorkSize.y;
+        const float ww = menuAreaSize.x, wh = menuAreaSize.y;
         ImVec2 menuSize(ww, wh);
         if (ww > 1280.0f) {
             menuSize.x = std::min(ww * 0.9f, wh * 1.77f);
@@ -244,7 +246,7 @@ void ComboMenu::DrawElement() {
             menuSize.y = wh * 0.9f;
         }
         ImGui::SetCursorScreenPos(
-            ImVec2(mvp->WorkPos.x + (ww - menuSize.x) * 0.5f, mvp->WorkPos.y + (wh - menuSize.y) * 0.5f));
+            ImVec2(menuAreaPos.x + (ww - menuSize.x) * 0.5f, menuAreaPos.y + (wh - menuSize.y) * 0.5f));
         ImGui::BeginChild("##ComboMenuBlock", menuSize, 0, ImGuiWindowFlags_NoScrollbar);
 
         // Stylized scope selector (rounded theme buttons) — Shared / SoH / MM. mScope persists.

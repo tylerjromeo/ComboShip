@@ -6,6 +6,7 @@
 // ctor, from soh.o2r) before any ROM exists. comboui already drives ImGui against that shared context
 // (ComboMenu.cpp), so it owns the frame loop here. The actual ROM validation + ZAPD work happens in
 // soh.dll / 2ship.dll via the function pointers in ComboExtractCallbacks; this file only renders.
+#include "ComboDualScreen.h"
 #include "ComboExtractScreen.h"
 #include "ComboExport.h"
 #include "ComboFilePicker.h"  // native Browse dialog (comdlg32 / pfd), shared with the settings-import screen
@@ -191,12 +192,15 @@ extern "C" COMBO_EXPORT int ComboUI_RunExtraction(const ComboExtractCallbacks* c
         // Preferred 680px, but clamp to the main window's work area so we never bleed outside it
         // (a new player's window can launch small/square before any resolution is persisted).
         const float kMargin = 20.0f;
-        float panelW = vp->WorkSize.x - kMargin * 2.0f;
+        // ComboShip Android: the panel goes on the second display when there is one.
+        ImVec2 areaPos, areaSize;
+        ComboDualScreen::MenuRect(areaPos, areaSize);
+        float panelW = areaSize.x - kMargin * 2.0f;
         if (panelW > 680.0f) {
             panelW = 680.0f;
         }
-        float panelMaxH = vp->WorkSize.y - kMargin * 2.0f;
-        ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        float panelMaxH = areaSize.y - kMargin * 2.0f;
+        ImGui::SetNextWindowPos(ComboDualScreen::Center(areaPos, areaSize), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSizeConstraints(ImVec2(panelW, 0.0f), ImVec2(panelW, panelMaxH));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f, 20.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);

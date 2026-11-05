@@ -3,6 +3,7 @@
 // a trimmed ComboExtractScreen: one PICK phase, two optional slots (SoH / 2Ship), Browse + auto-detect,
 // Import / Skip. The launcher does the JSON parse + merge + apply; this file only renders and reports
 // the chosen paths.
+#include "ComboDualScreen.h"
 #include "ComboSettingsImportScreen.h"
 #include "ComboExport.h"
 #include "ComboFilePicker.h"  // native Browse dialog (comdlg32 / pfd), shared with the extraction screen
@@ -148,12 +149,15 @@ extern "C" COMBO_EXPORT int ComboUI_RunSettingsImport(const ComboSettingsImportC
                                                       IM_COL32(0, 0, 0, 210));
 
         const float kMargin = 20.0f;
-        float panelW = vp->WorkSize.x - kMargin * 2.0f;
+        // ComboShip Android: the panel goes on the second display when there is one.
+        ImVec2 areaPos, areaSize;
+        ComboDualScreen::MenuRect(areaPos, areaSize);
+        float panelW = areaSize.x - kMargin * 2.0f;
         if (panelW > 680.0f) {
             panelW = 680.0f;
         }
-        float panelMaxH = vp->WorkSize.y - kMargin * 2.0f;
-        ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        float panelMaxH = areaSize.y - kMargin * 2.0f;
+        ImGui::SetNextWindowPos(ComboDualScreen::Center(areaPos, areaSize), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
         ImGui::SetNextWindowSizeConstraints(ImVec2(panelW, 0.0f), ImVec2(panelW, panelMaxH));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(24.0f, 20.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 6.0f);

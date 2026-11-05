@@ -1,4 +1,7 @@
 
+#ifdef COMBO_BUILD
+#include "ComboDualScreen.h"
+#endif
 #include "Notification.h"
 #include <libultraship/bridge/consolevariablebridge.h>
 #include <ship/Context.h>
@@ -19,6 +22,13 @@ static std::vector<Options> notifications = {};
 
 void Window::Draw() {
     auto vp = ImGui::GetMainViewport();
+    ImVec2 vpPos = vp->Pos, vpSize = vp->Size;
+#ifdef COMBO_BUILD
+    // ComboShip: keep notifications on the game display when the canvas spans two displays.
+    if (ComboDualScreen::IsActive()) {
+        ComboDualScreen::GameRect(vpPos, vpSize);
+    }
+#endif
 
     const float margin = 30.0f;
     const float padding = 10.0f;
@@ -29,16 +39,16 @@ void Window::Draw() {
     ImVec2 basePosition;
     switch (position) {
         case 0: // Top Left
-            basePosition = ImVec2(vp->Pos.x + margin, vp->Pos.y + margin);
+            basePosition = ImVec2(vpPos.x + margin, vpPos.y + margin);
             break;
         case 1: // Top Right
-            basePosition = ImVec2(vp->Pos.x + vp->Size.x - margin, vp->Pos.y + margin);
+            basePosition = ImVec2(vpPos.x + vpSize.x - margin, vpPos.y + margin);
             break;
         case 2: // Bottom Left
-            basePosition = ImVec2(vp->Pos.x + margin, vp->Pos.y + vp->Size.y - margin);
+            basePosition = ImVec2(vpPos.x + margin, vpPos.y + vpSize.y - margin);
             break;
         case 3: // Bottom Right
-            basePosition = ImVec2(vp->Pos.x + vp->Size.x - margin, vp->Pos.y + vp->Size.y - margin);
+            basePosition = ImVec2(vpPos.x + vpSize.x - margin, vpPos.y + vpSize.y - margin);
             break;
         case 4: // Hidden
             return;
