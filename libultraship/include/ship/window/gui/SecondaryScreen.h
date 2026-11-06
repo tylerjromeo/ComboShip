@@ -63,6 +63,10 @@ void PlaceOnSecondary(const char* windowName);
 // (NoDocking, a floating-overlay look). Returns false otherwise.
 #define CVAR_SECONDARY_SCREEN_TRACKER_DOCK "gSettings.SecondaryScreen.TrackerDock" // default 1
 bool DockOnSecondary(const char* windowName);
+
+// ComboShip: for overlays that belong on the game display (item trackers). Once per session, a window
+// found on the secondary display is moved back to the game display's top-right. No-op otherwise.
+void PlaceOnPrimary(const char* windowName);
 #endif
 
 // --- Integration points (called by the GUI backend, not by game code) ---

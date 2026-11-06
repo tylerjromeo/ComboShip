@@ -68,8 +68,10 @@ bool BeginFloatWindows(const std::string& UniqueName, bool* open, const Color_RG
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
 #ifdef COMBO_BUILD
-    if (!dockedOnSecondScreen) {
-        Ship::SecondaryScreen::PlaceOnSecondary(UniqueName.c_str()); // ComboShip: trackers start on the second display
+    if (listTracker && !dockedOnSecondScreen) {
+        Ship::SecondaryScreen::PlaceOnSecondary(UniqueName.c_str()); // ComboShip: list trackers go below
+    } else if (!listTracker) {
+        Ship::SecondaryScreen::PlaceOnPrimary(UniqueName.c_str()); // item trackers stay over the game
     }
 #endif
 #ifdef COMBO_BUILD

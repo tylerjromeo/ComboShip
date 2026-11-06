@@ -613,7 +613,7 @@ comboSkipVisibilityGates:;
         if (!CVarGetInteger("gSettings.ItemTracker.WindowType", 0))
             ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
         // ComboShip: distinct ImGui identity (##MM) so OOT's and MM's item trackers can show together.
-        Ship::SecondaryScreen::PlaceOnSecondary("Item Tracker##MM"); // trackers start on the second display
+        Ship::SecondaryScreen::PlaceOnPrimary("Item Tracker##MM"); // item trackers stay over the game
         singleWindowOpen = ImGui::Begin("Item Tracker##MM", nullptr, windowFlags);
 #else
         singleWindowOpen = ImGui::Begin("Item Tracker", nullptr, windowFlags);
@@ -643,7 +643,7 @@ comboSkipVisibilityGates:;
             name += "MM"; // distinct ImGui identity vs OOT's split-group windows
             if (!CVarGetInteger("gSettings.ItemTracker.WindowType", 0)) // same floating-only pin as above
                 ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-            Ship::SecondaryScreen::PlaceOnSecondary(name.c_str());
+            Ship::SecondaryScreen::PlaceOnPrimary(name.c_str());
 #endif
             isWindowOpen = ImGui::Begin(name.c_str(), nullptr, windowFlags);
         } else {

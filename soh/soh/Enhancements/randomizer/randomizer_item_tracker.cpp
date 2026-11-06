@@ -1843,8 +1843,23 @@ void ItemTrackerWindow::DrawElement() {
     int iconSpacing = CVarGetInteger(CVAR_TRACKER_ITEM("IconSpacing"), 12);
     int comboButton1Mask = buttonMap[CVarGetInteger(CVAR_TRACKER_ITEM("ComboButton1"), TRACKER_COMBO_BUTTON_L)];
     int comboButton2Mask = buttonMap[CVarGetInteger(CVAR_TRACKER_ITEM("ComboButton2"), TRACKER_COMBO_BUTTON_R)];
+#ifdef COMBO_BUILD
+    // ComboShip (Android): this cast came back null there; don't crash, and say why once.
+    auto baseDeck = Ship::Context::GetRawInstance()->GetControlDeck();
+    auto lusDeck = std::dynamic_pointer_cast<LUS::ControlDeck>(baseDeck);
+    if (lusDeck == nullptr) {
+        static bool sLogged = false;
+        if (!sLogged) {
+            sLogged = true;
+            SPDLOG_ERROR("[ComboShip] item tracker: control deck cast failed (deck={}, type={})",
+                         (void*)baseDeck.get(), baseDeck ? typeid(*baseDeck).name() : "null");
+        }
+    }
+    OSContPad* buttonsPressed = lusDeck ? lusDeck->GetPads() : nullptr;
+#else
     OSContPad* buttonsPressed =
         std::dynamic_pointer_cast<LUS::ControlDeck>(Ship::Context::GetRawInstance()->GetControlDeck())->GetPads();
+#endif
     bool comboButtonsHeld = buttonsPressed != nullptr && buttonsPressed[0].button & comboButton1Mask &&
                             buttonsPressed[0].button & comboButton2Mask;
     bool isPaused = CVarGetInteger(CVAR_TRACKER_ITEM("ShowOnlyPaused"), 0) == 0 ||

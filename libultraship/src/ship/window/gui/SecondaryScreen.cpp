@@ -94,6 +94,20 @@ ImVec2 sShelfCursor = ImVec2(-1.0f, -1.0f);
 float sShelfHeight = 0.0f;
 } // namespace
 
+void PlaceOnPrimary(const char* windowName) {
+    static std::unordered_set<std::string> sChecked;
+    if (!IsActive() || windowName == nullptr || !sChecked.insert(windowName).second) {
+        return;
+    }
+    ImGuiWindow* window = ImGui::FindWindowByName(windowName);
+    if (window == nullptr || window->DockIsActive || !ContainsPoint(window->Pos)) {
+        return;
+    }
+    // Saved on the second display (an earlier build put it there): bring it back to the game display.
+    const ImVec2 primary = GetPrimarySize();
+    ImGui::SetNextWindowPos(ImVec2(std::max(16.0f, primary.x - window->Size.x - 16.0f), 16.0f), ImGuiCond_Always);
+}
+
 namespace {
 ImGuiID TrackerDockId() {
     return ImHashStr("SecondaryScreenTrackerDockSpace");
