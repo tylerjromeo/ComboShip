@@ -19,6 +19,9 @@
 #endif
 
 #include "fast/backends/gfx_opengl.h"
+
+#include <cstring>
+#include <spdlog/spdlog.h>
 #include "ship/window/gui/Gui.h"
 #include <prism/processor.h>
 #include <fstream>
@@ -702,9 +705,59 @@ void GfxRenderingAPIOGL::DrawTriangles(float buf_vbo[], size_t buf_vbo_len, size
 
     SetPerDrawUniforms();
 
+#ifdef USE_OPENGLES
+    // Stream vertices through one fixed VBO instead of re-specifying it with glBufferData per draw: on
+    // Adreno that allocates fresh kernel memory (kgsl_sharedmem_alloc) for most draws once many are in
+    // flight -- 60% of the frame near MM's dogs on the AYN Thor. The ring is persistently mapped, so a
+    // draw is just a memcpy; a fence per quarter keeps the CPU off data the GPU may still read.
+    // (A per-draw glMapBufferRange costs an ioctl pair, and INVALIDATE_RANGE allocates like glBufferData.)
+    const size_t vertexCount = 3 * buf_vbo_num_tris;
+    const size_t bytes = sizeof(float) * buf_vbo_len;
+    const size_t stride = bytes / vertexCount;
+    size_t offset = (mVboOffset + stride - 1) / stride * stride; // glDrawArrays 'first' needs stride alignment
+    if (mVboMapped != nullptr && bytes <= kVboSegmentBytes - stride) {
+        // A batch never straddles two segments, so each segment's fence covers every draw that read it.
+        if (offset / kVboSegmentBytes != (offset + bytes - 1) / kVboSegmentBytes) {
+            offset = ((offset / kVboSegmentBytes + 1) * kVboSegmentBytes + stride - 1) / stride * stride;
+        }
+        if (offset + bytes > kVboRingBytes) {
+            offset = 0;
+        }
+        const size_t segment = offset / kVboSegmentBytes;
+        while (mVboSegment != segment) {
+            if (mVboFences[mVboSegment] != nullptr) {
+                glDeleteSync(mVboFences[mVboSegment]);
+            }
+            mVboFences[mVboSegment] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+            mVboSegment = (mVboSegment + 1) % kVboSegments;
+            if (mVboFences[mVboSegment] != nullptr) {
+                glClientWaitSync(mVboFences[mVboSegment], GL_SYNC_FLUSH_COMMANDS_BIT, 1000000000ull);
+                glDeleteSync(mVboFences[mVboSegment]);
+                mVboFences[mVboSegment] = nullptr;
+            }
+        }
+        memcpy(mVboMapped + offset, buf_vbo, bytes);
+    } else {
+        // No persistent mapping: unsynchronized writes into the ring, orphaning it only on wrap.
+        if (offset + bytes > kVboRingBytes) {
+            glBufferData(GL_ARRAY_BUFFER, kVboRingBytes, nullptr, GL_STREAM_DRAW);
+            offset = 0;
+        }
+        void* dst = glMapBufferRange(GL_ARRAY_BUFFER, offset, bytes, GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT);
+        if (dst != nullptr) {
+            memcpy(dst, buf_vbo, bytes);
+            glUnmapBuffer(GL_ARRAY_BUFFER);
+        } else {
+            glBufferSubData(GL_ARRAY_BUFFER, offset, bytes, buf_vbo);
+        }
+    }
+    glDrawArrays(GL_TRIANGLES, offset / stride, vertexCount);
+    mVboOffset = offset + bytes;
+#else
     // printf("flushing %d tris\n", buf_vbo_num_tris);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * buf_vbo_len, buf_vbo, GL_STREAM_DRAW);
     glDrawArrays(GL_TRIANGLES, 0, 3 * buf_vbo_num_tris);
+#endif
 }
 
 void GfxRenderingAPIOGL::Init() {
@@ -714,6 +767,30 @@ void GfxRenderingAPIOGL::Init() {
 
     glGenBuffers(1, &mOpenglVbo);
     glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
+#ifdef USE_OPENGLES
+    {
+        auto bufferStorage = (PFNGLBUFFERSTORAGEEXTPROC)SDL_GL_GetProcAddress("glBufferStorageEXT");
+        const GLbitfield flags = GL_MAP_WRITE_BIT | GL_MAP_PERSISTENT_BIT_EXT | GL_MAP_COHERENT_BIT_EXT;
+        if (bufferStorage != nullptr) {
+            while (glGetError() != GL_NO_ERROR) {
+            }
+            bufferStorage(GL_ARRAY_BUFFER, kVboRingBytes, nullptr, flags);
+            if (glGetError() == GL_NO_ERROR) {
+                mVboMapped = (uint8_t*)glMapBufferRange(GL_ARRAY_BUFFER, 0, kVboRingBytes, flags);
+            }
+        }
+        if (mVboMapped == nullptr) {
+            // Immutable storage may have been created above; start over with a mutable buffer.
+            glDeleteBuffers(1, &mOpenglVbo);
+            glGenBuffers(1, &mOpenglVbo);
+            glBindBuffer(GL_ARRAY_BUFFER, mOpenglVbo);
+            glBufferData(GL_ARRAY_BUFFER, kVboRingBytes, nullptr, GL_STREAM_DRAW);
+        }
+        SPDLOG_INFO("OpenGL vertex ring: {}", mVboMapped != nullptr ? "persistent map" : "map per draw");
+        mVboOffset = 0;
+        mVboSegment = 0;
+    }
+#endif
 
 #if defined(__APPLE__) || defined(USE_OPENGLES)
     glGenVertexArrays(1, &mOpenglVao);

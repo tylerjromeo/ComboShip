@@ -19,6 +19,7 @@
 #elif USE_OPENGLES
 #include <SDL2/SDL.h>
 #include <GLES3/gl3.h>
+#include <GLES2/gl2ext.h>
 #else
 #include <SDL2/SDL.h>
 #define GL_GLEXT_PROTOTYPES 1
@@ -123,6 +124,17 @@ class GfxRenderingAPIOGL final : public GfxRenderingAPI {
     ShaderProgram* mLastLoadedShader = nullptr;
 
     GLuint mOpenglVbo = 0;
+#ifdef USE_OPENGLES
+    // Streaming vertex ring (see DrawTriangles). mVboMapped is a persistent, coherent mapping of the
+    // whole ring when GL_EXT_buffer_storage is available; each quarter of the ring is guarded by a fence.
+    static constexpr size_t kVboRingBytes = 4 * 1024 * 1024;
+    static constexpr size_t kVboSegments = 4;
+    static constexpr size_t kVboSegmentBytes = kVboRingBytes / kVboSegments;
+    size_t mVboOffset = 0;
+    size_t mVboSegment = 0;
+    uint8_t* mVboMapped = nullptr;
+    GLsync mVboFences[kVboSegments] = {};
+#endif
 #if defined(__APPLE__) || defined(USE_OPENGLES)
     GLuint mOpenglVao;
 #endif
