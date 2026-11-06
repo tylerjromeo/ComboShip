@@ -2781,6 +2781,9 @@ extern "C" COMBO_EXPORT void MM_ResumeGame(int fileNum) {
     //    time OOT was running). Its archives + factories + resource cache never went away, so there's
     //    nothing to swap, unload, re-register, or reset (message tables/audio samples stay valid).
     ctx->SetResourceManager(sMMResourceManager);
+    // ComboShip: drop OOT's segment bases from the shared interpreter before MM draws; MM's first frame
+    // otherwise resolved an unbound segment against an OOT pointer and crashed in gfx_set_timg.
+    gfx_reset_segment_pointers();
 
     // 2. Restart MM's audio thread (MM_PrepareForTransition stopped it). Soundfonts/samples are still
     //    resident in MM's RM, so it resumes against valid data with no reload/heap reset.

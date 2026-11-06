@@ -3558,6 +3558,10 @@ static void SOH_ReinitForResume() {
     // no message-table/audio-heap reset needed. This is what eliminates the whole dangling class.
     ctx->SetResourceManager(sOOTResourceManager);
 
+    // ComboShip: drop MM's segment bases from the shared interpreter before OOT draws (see LUS
+    // gfx_reset_segment_pointers).
+    gfx_reset_segment_pointers();
+
     // Restart OOT's audio thread (SOH_PrepareForTransition stopped it). Soundfonts/samples are still
     // resident in OOT's RM, so the thread resumes against valid data with no reload/heap reset.
     OTRAudio_Init(); // counterpart to OTRAudio_Exit() in SOH_PrepareForTransition

@@ -503,6 +503,12 @@ ColorCombiner* Interpreter::LookupOrCreateColorCombiner(const ColorCombinerKey& 
     return &mPrevCombiner->second;
 }
 
+void Interpreter::ResetSegmentPointers() {
+    for (int i = 0; i < MAX_SEGMENT_POINTERS; i++) {
+        mSegmentPointers[i] = 0;
+    }
+}
+
 void Interpreter::SetResolvedResourceCacheEnabled(bool enabled) {
     mResolvedResourceCacheEnabled = enabled;
     if (!enabled) {
@@ -2003,7 +2009,10 @@ void Interpreter::GfxSpTri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t vtx3_idx
         cc_options |= SHADER_OPT(TEXEL1_BLEND);
     }
 
-    ColorCombinerKey key;
+    // Value-initialize: shader_id is never assigned, and a garbage value makes every lookup miss, so
+    // mColorCombinerPool grows without bound (one ~4 KB node per draw; on Android this exhausts the heap
+    // and the 65530 mmap limit after ~90 min and the GPU driver crashes on a failed allocation).
+    ColorCombinerKey key{};
     key.combine_mode = mRdp->combine_mode;
     key.options = cc_options;
 
@@ -2580,6 +2589,25 @@ void Interpreter::GfxDpLoadTlut(uint8_t tile, uint32_t high_index) {
 
     uint16_t tmem = mRdp->texture_tile[tile].tmem;
     const uint8_t* src = mRdp->texture_to_load.addr;
+#ifdef COMBO_BUILD
+    // ComboShip: a palette load from a garbage source address crashed MM on Android right after
+    // resuming a save (0x003013c85542ec5e). Skip such loads instead of dereferencing them, and say
+    // which texture the bad address came from so the real cause can be tracked down.
+    {
+        const uintptr_t checked = gfx_address_for_range_check(reinterpret_cast<uintptr_t>(src));
+        if (src == nullptr || checked < 0x10000 || checked > UINT64_C(0x0000FFFFFFFFFFFF)) {
+            static uint32_t sLogged = 0;
+            if (sLogged++ < 16) {
+                const auto& res = mRdp->texture_to_load.raw_tex_metadata.resource;
+                SPDLOG_ERROR("[ComboShip] LoadTlut: skipped invalid palette address {} (tile {}, {} entries, "
+                             "resource '{}')",
+                             (const void*)src, (int)tile, high_index + 1,
+                             (res && res->GetInitData()) ? res->GetInitData()->Path : std::string("none"));
+            }
+            return;
+        }
+    }
+#endif
     uint32_t entryCount = high_index + 1;
     uint32_t byteCount = entryCount * 2;
 
@@ -3246,7 +3274,10 @@ void Interpreter::Gfxs2dexBg1cyc(F3DuObjBg* bg) {
     GfxDpSetTextureImage(bg->b.imageFmt, bg->b.imageSiz, bg->b.imageW >> 2, nullptr, texFlags, rawTexMetadata,
                          (void*)data);
     GfxDpSetTile(bg->b.imageFmt, bg->b.imageSiz, 0, 0, G_TX_LOADTILE, 0, 0, 0, 0, 0, 0, 0);
-    GfxDpLoadBlock(G_TX_LOADTILE, 0, 0, (bg->b.imageW * bg->b.imageH >> 4) - 1, 0);
+    // ComboShip (from linkzenic/libultraship 31b88a48, "Fix S2DEX background texture size"): the load
+    // size is in 64-bit words from the integer texel dimensions; the 10.2 fixed-point product
+    // overcounted and crashed MM's Grandma story background on Android.
+    GfxDpLoadBlock(G_TX_LOADTILE, 0, 0, ((bg->b.imageW >> 2) * (bg->b.imageH >> 2)) - 1, 0);
     GfxDpSetTile(bg->b.imageFmt, bg->b.imageSiz, (((lrs - uls) * bg->b.imageSiz) + 7) >> 3, 0, G_TX_RENDERTILE,
                  bg->b.imagePal, 0, 0, 0, 0, 0, 0);
     GfxDpSetTileSize(G_TX_RENDERTILE, 0, 0, bg->b.imageW, bg->b.imageH);
@@ -5701,6 +5732,14 @@ extern "C" int gfx_create_framebuffer(uint32_t width, uint32_t height, uint32_t 
 
 extern "C" void gfx_texture_cache_clear() {
     Fast::mInstance.lock().get()->TextureCacheClear();
+}
+
+// ComboShip: the interpreter (and its segment table) is shared by both games. Segment bases persist
+// across frames, so on a game switch the incoming game's first frames would resolve any segment it
+// hasn't re-bound yet against the other game's stale pointers (garbage reads / SIGSEGV). Clearing
+// them makes unbound segments fall back to the raw segmented address, which the handlers reject.
+extern "C" void gfx_reset_segment_pointers() {
+    Fast::mInstance.lock().get()->ResetSegmentPointers();
 }
 
 extern "C" void gfx_shader_cache_clear() {

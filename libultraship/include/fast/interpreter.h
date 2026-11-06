@@ -429,6 +429,7 @@ class Interpreter {
     ColorCombiner* LookupOrCreateColorCombiner(const ColorCombinerKey& key);
     void ShaderCacheClear();
     void TextureCacheClear();
+    void ResetSegmentPointers();
     std::shared_ptr<Ship::IResource> ResolveResourceCached(const char* path);
     bool TextureCacheLookup(int i, const TextureCacheKey& key);
     void TextureCacheDelete(const uint8_t* origAddr);
@@ -580,6 +581,7 @@ const char* GfxGetOpcodeName(int8_t opcode);
 } // namespace Fast
 
 extern "C" void gfx_texture_cache_clear();
+extern "C" void gfx_reset_segment_pointers();
 extern "C" void gfx_shader_cache_clear();
 extern "C" int gfx_create_framebuffer(uint32_t width, uint32_t height, uint32_t native_width, uint32_t native_height,
                                       uint8_t resize, bool forceFixedAspect = false);

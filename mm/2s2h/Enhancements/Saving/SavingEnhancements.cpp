@@ -89,6 +89,41 @@ extern "C" void SavingEnhancements_ClearSaveEntranceInfo() {
     memset(&gSaveContext.save.shipSaveInfo.respawn, 0, sizeof(gSaveContext.save.shipSaveInfo.respawn));
 }
 
+// ComboShip diagnostics: which SavingEnhancements_CanSave() condition fails (nullptr = can save).
+extern "C" const char* SavingEnhancements_CannotSaveReason() {
+    if (gPlayState == NULL || GET_PLAYER(gPlayState) == NULL) {
+        return "no play state / player";
+    }
+    if (!gSaveContext.flashSaveAvailable) {
+        return "flashSaveAvailable is false";
+    }
+    if (gSaveContext.fileNum == 255) {
+        return "fileNum is 255 (no save slot)";
+    }
+    if (Player_InBlockingCsMode(gPlayState, GET_PLAYER(gPlayState))) {
+        return "player in blocking cutscene mode";
+    }
+    if (gPlayState->msgCtx.msgMode != 0) {
+        return "message box active";
+    }
+    if (gPlayState->sceneId == SCENE_SPOT00 || gPlayState->sceneId == SCENE_LOST_WOODS ||
+        gPlayState->sceneId == SCENE_OPENINGDAN) {
+        return "pre-Clock Town scene";
+    }
+    if (gPlayState->sceneId == SCENE_SOUGEN || gPlayState->sceneId == SCENE_LAST_LINK ||
+        gPlayState->sceneId == SCENE_LAST_DEKU || gPlayState->sceneId == SCENE_LAST_GORON ||
+        gPlayState->sceneId == SCENE_LAST_ZORA || gPlayState->sceneId == SCENE_LAST_BS) {
+        return "moon scene";
+    }
+    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_08_01)) return "weekEventReg 08_01 set";
+    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_82_08)) return "weekEventReg 82_08 set";
+    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_90_20)) return "weekEventReg 90_20 set";
+    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_KICKOUT_WAIT)) return "weekEventReg KICKOUT_WAIT set";
+    if (CHECK_EVENTINF(EVENTINF_34)) return "eventInf 34 set";
+    if (CHECK_EVENTINF(EVENTINF_41)) return "eventInf 41 set";
+    return nullptr;
+}
+
 extern "C" bool SavingEnhancements_CanSave() {
     // Game State
     if (gPlayState == NULL || GET_PLAYER(gPlayState) == NULL) {
