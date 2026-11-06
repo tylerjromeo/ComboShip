@@ -35,7 +35,15 @@ class ControlDeck {
     ControlDeck(std::vector<CONTROLLERBUTTONS_T> additionalBitmasks,
                 std::shared_ptr<ControllerDefaultMappings> controllerDefaultMappings,
                 std::unordered_map<CONTROLLERBUTTONS_T, std::string> buttonNames);
+#ifdef COMBO_BUILD
+    // ComboShip: virtual, so this out-of-line destructor is the class's key function and only
+    // libultraship emits its typeinfo. Without one, every module compiled its own hidden copy, and
+    // on Android (libc++abi compares typeinfo by address) the games' dynamic_cast<LUS::ControlDeck>
+    // always returned null.
+    virtual ~ControlDeck();
+#else
     ~ControlDeck();
+#endif
 
     /**
      * @brief Initialises the controller deck and loads saved mappings from Config.
