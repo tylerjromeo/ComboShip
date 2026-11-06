@@ -1914,6 +1914,7 @@ static void RunComboFillBody(std::string inputSeed, ComboRando::ComboGenProgress
                 // is meaningfully "required" — same compromise as MmOnlyMajoraGoal.
                 std::cout << "[ComboShip] RunComboFill: pare-down skipped (No Logic + Triforce Hunt)\n";
             } else if (ComboRando::NeedsRequirednessPareDown(sohHintDump, mmDump)) {
+                const auto pareStart = std::chrono::steady_clock::now();
                 // NO_LOGIC: gate requiredness on MM only (OOT may be unbeatable by design).
                 pareDownResult =
                     ComboRando::PareDownPlaythrough(result.spoilerJson, ootOracle, mmOracle, nullptr, sohDump, mmDump,
@@ -1922,6 +1923,11 @@ static void RunComboFillBody(std::string inputSeed, ComboRando::ComboGenProgress
                                                     : noLogic ? ComboRando::MmOnlyMajoraGoal
                                                               : ComboRando::DefaultGanonMajoraGoal,
                                                     !noLogic, mmStart, progress);
+                std::cout << "[ComboShip] RunComboFill: pare-down took "
+                          << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                                   pareStart)
+                                 .count()
+                          << " ms\n";
             } else {
                 std::cout << "[ComboShip] RunComboFill: pare-down skipped (no enabled hint surface needs "
                              "requiredness)\n";
@@ -1931,8 +1937,14 @@ static void RunComboFillBody(std::string inputSeed, ComboRando::ComboGenProgress
             // ComboShip: write the sphere-by-sphere playthrough log. Replays reachability via the
             // oracles BEFORE SOH_ApplyRandoPlacements restores the live OOT context, so it can't
             // corrupt the generated seed. Restores MM itself.
+            const auto playthroughStart = std::chrono::steady_clock::now();
             WriteComboPlaythrough(result.spoilerJson, ootOracle, mmOracle, inputSeed, &playthroughJson, sohDump, mmDump,
                                   goal, mmStart, sharedMask);
+            std::cout << "[ComboShip] RunComboFill: playthrough took "
+                      << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
+                                                                               playthroughStart)
+                             .count()
+                      << " ms\n";
             if (cancelled())
                 return;
         } else {
@@ -2138,9 +2150,14 @@ static void RunComboFillBody(std::string inputSeed, ComboRando::ComboGenProgress
         // ComboShip: cross-game hint generation (Phase 3) — real per-seed hint assignments, from the
         // pare-down computed above. usedCombinedFill guards the no-logic fallback path (no oracles/
         // pare-down data there): that path ships with an empty hints payload, same as before Phase 3.
+        const auto hintsStart = std::chrono::steady_clock::now();
         consolidated["hints"] = usedCombinedFill ? ComboRando::Generate(masterSeed, sohDump, sohHintDump, mmDump,
                                                                         foreignEnriched, spoiler, pareDownResult)
                                                  : nlohmann::json{ { "version", 1 } };
+        std::cout << "[ComboShip] RunComboFill: hints took "
+                  << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - hintsStart)
+                         .count()
+                  << " ms\n";
         if (cancelled())
             return;
         g_FinalizeOotApply = ootApply.dump();

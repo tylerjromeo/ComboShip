@@ -64,8 +64,9 @@ void PlaceOnSecondary(const char* windowName);
 #define CVAR_SECONDARY_SCREEN_TRACKER_DOCK "gSettings.SecondaryScreen.TrackerDock" // default 1
 bool DockOnSecondary(const char* windowName);
 
-// ComboShip: for overlays that belong on the game display (item trackers). Once per session, a window
-// found on the secondary display is moved back to the game display's top-right. No-op otherwise.
+// ComboShip: for overlays that belong on the game display (item trackers). Call right before
+// ImGui::Begin(windowName, ...) every frame: any part of the window past the game display's right
+// edge (onto the secondary display) is shifted back onto the game display. No-op otherwise.
 void PlaceOnPrimary(const char* windowName);
 #endif
 

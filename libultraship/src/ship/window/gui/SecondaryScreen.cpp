@@ -95,21 +95,22 @@ float sShelfHeight = 0.0f;
 } // namespace
 
 void PlaceOnPrimary(const char* windowName) {
-    static std::unordered_set<std::string> sChecked;
-    if (!IsActive() || windowName == nullptr || sChecked.count(windowName) != 0) {
+    if (!IsActive() || windowName == nullptr) {
         return;
     }
     ImGuiWindow* window = ImGui::FindWindowByName(windowName);
-    if (window == nullptr) {
-        return; // not created yet (its saved position is applied by the first Begin): check next frame
+    if (window == nullptr || window->DockIsActive) {
+        return; // not created yet (next frame then), or docked somewhere on purpose
     }
-    sChecked.insert(windowName);
-    if (window->DockIsActive || !ContainsPoint(window->Pos)) {
-        return;
-    }
-    // Saved on the second display (an earlier build put it there): bring it back to the game display.
+    // Every frame, not once: these windows auto-size to their contents and ComboShip lines MM's up
+    // beside OoT's, so either can grow or be placed across the seam after any one-time move.
     const ImVec2 primary = GetPrimarySize();
-    ImGui::SetNextWindowPos(ImVec2(std::max(16.0f, primary.x - window->Size.x - 16.0f), 16.0f), ImGuiCond_Always);
+    const float margin = 8.0f;
+    if (window->Pos.x + window->Size.x > primary.x - margin) {
+        const float x = std::max(margin, primary.x - window->Size.x - margin);
+        ImGui::SetNextWindowPos(ImVec2(x, std::clamp(window->Pos.y, 0.0f, std::max(0.0f, primary.y - 32.0f))),
+                                ImGuiCond_Always);
+    }
 }
 
 namespace {
