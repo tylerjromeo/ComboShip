@@ -96,11 +96,15 @@ float sShelfHeight = 0.0f;
 
 void PlaceOnPrimary(const char* windowName) {
     static std::unordered_set<std::string> sChecked;
-    if (!IsActive() || windowName == nullptr || !sChecked.insert(windowName).second) {
+    if (!IsActive() || windowName == nullptr || sChecked.count(windowName) != 0) {
         return;
     }
     ImGuiWindow* window = ImGui::FindWindowByName(windowName);
-    if (window == nullptr || window->DockIsActive || !ContainsPoint(window->Pos)) {
+    if (window == nullptr) {
+        return; // not created yet (its saved position is applied by the first Begin): check next frame
+    }
+    sChecked.insert(windowName);
+    if (window->DockIsActive || !ContainsPoint(window->Pos)) {
         return;
     }
     // Saved on the second display (an earlier build put it there): bring it back to the game display.
