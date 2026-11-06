@@ -1,4 +1,5 @@
 // combo/gui/ComboNotesWindow.cpp — see ComboNotesWindow.h
+#include <ship/window/gui/SecondaryScreen.h>
 #include "ComboNotesWindow.h"
 #include "ComboExport.h"
 #include "ComboTrackerCommon.h" // ComboTracker::OotActiveSlot + SetTracker
@@ -61,6 +62,10 @@ void ComboNotesWindow::Draw() {
     }
 
     ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
+    // Dual-screen Android: a tab on the second display next to the list trackers.
+    if (!Ship::SecondaryScreen::DockOnSecondary(kWindowName)) {
+        Ship::SecondaryScreen::PlaceOnSecondary(kWindowName);
+    }
     if (ImGui::Begin(kWindowName, nullptr, ImGuiWindowFlags_NoFocusOnAppearing)) {
         DrawElement();
     }

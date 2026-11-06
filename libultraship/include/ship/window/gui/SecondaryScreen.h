@@ -49,6 +49,22 @@ ImVec2 GetUiScreenPos();
 ImVec2 GetUiScreenSize();
 ImVec2 GetUiScreenCenter();
 
+#ifdef COMBO_BUILD
+// ComboShip: call right before ImGui::Begin(windowName, ...) of a tracker-style window. The first time
+// it is seen while a secondary display is active, the window is moved onto that display (shelf-packed
+// next to the others) unless it is already there or docked. After that it is left where the user
+// drags it, and imgui.ini keeps it there. No-op without a secondary display.
+void PlaceOnSecondary(const char* windowName);
+
+// ComboShip: for list-style trackers (check, entrance, hint, notes). Call right before
+// ImGui::Begin(windowName, ...): while a secondary display is active (and
+// CVAR_SECONDARY_SCREEN_TRACKER_DOCK is on) the window is docked as a tab into a fixed full-screen
+// dockspace on that display, and true is returned so the caller drops flags that forbid docking
+// (NoDocking, a floating-overlay look). Returns false otherwise.
+#define CVAR_SECONDARY_SCREEN_TRACKER_DOCK "gSettings.SecondaryScreen.TrackerDock" // default 1
+bool DockOnSecondary(const char* windowName);
+#endif
+
 // --- Integration points (called by the GUI backend, not by game code) ---
 
 // Call right after the platform backend's NewFrame (which sets io.DisplaySize to the primary window size) and before

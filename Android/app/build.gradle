@@ -11,7 +11,11 @@ def androidAppVersionName = "0.3.0-android.1"
 def sohSupportArchive = providers.gradleProperty("sohSupportArchive").orElse("../../soh/soh.o2r")
 def mmSupportArchive = providers.gradleProperty("mmSupportArchive").orElse("../../mm/2ship.o2r")
 
-def nativeArgs = ["-DSDL_SHARED=ON", "-DANDROID_STL=c++_static", "-DHAVE_LD_VERSION_SCRIPT=OFF",
+// c++_shared, not the c++_static the single-library SoH/2S2H apps use: ComboShip's modules pass C++
+// objects to each other (shared_ptr<Context>, dynamic_cast on libultraship types, exceptions), which
+// needs ONE C++ runtime in the process. With c++_static each .so gets its own copy and cross-module
+// dynamic_cast silently returns null (crashed the item tracker in ControlDeck::GetPads).
+def nativeArgs = ["-DSDL_SHARED=ON", "-DANDROID_STL=c++_shared", "-DHAVE_LD_VERSION_SCRIPT=OFF",
                   "-DUSE_OPENGLES=ON", "-DANDROID_APP_VERSION_NAME=${androidAppVersionName}"]
 // Every module the launcher loads. AGP only packages the outputs of the targets it builds.
 def nativeTargets = ["ComboShip", "comboui", "soh", "2ship", "libultraship", "SDL2"]

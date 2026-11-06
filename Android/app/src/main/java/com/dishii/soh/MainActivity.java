@@ -66,7 +66,7 @@ public class MainActivity extends SDLActivity{
     // SDLActivity calls SDL_main in the last library of this list.
     @Override
     protected String[] getLibraries() {
-        return new String[] { "SDL2", "ultraship", "soh", "2ship", "comboui", "main" };
+        return new String[] { "c++_shared", "SDL2", "ultraship", "soh", "2ship", "comboui", "main" };
     }
 
     SharedPreferences preferences;

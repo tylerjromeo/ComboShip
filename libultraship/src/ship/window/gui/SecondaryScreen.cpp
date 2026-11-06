@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <string>
+#include <unordered_set>
 
 #include <imgui_internal.h>
 
@@ -82,6 +84,112 @@ ImVec2 GetUiScreenSize() {
 ImVec2 GetUiScreenCenter() {
     return sFrameActive ? GetSecondaryCenter() : GetPrimaryCenter();
 }
+
+#ifdef COMBO_BUILD
+// ComboShip: see the header. State lives here, in the one shared libultraship, so trackers from
+// soh, 2ship and comboui pack into the same shelves.
+namespace {
+std::unordered_set<std::string> sPlacedOnSecondary;
+ImVec2 sShelfCursor = ImVec2(-1.0f, -1.0f);
+float sShelfHeight = 0.0f;
+} // namespace
+
+namespace {
+ImGuiID TrackerDockId() {
+    return ImHashStr("SecondaryScreenTrackerDockSpace");
+}
+
+// A fixed, full-screen, invisible window on the secondary display hosting a dockspace. Docked windows
+// show as tabs; the dockspace can't be moved, resized, split or undocked from, so finger drags only
+// scroll. From linkzenic's SoH Android port (soh/soh/SohGui/DualScreen.cpp there).
+void DrawTrackerDockHost() {
+    static int sLastFrame = -1;
+    const int frame = ImGui::GetFrameCount();
+    if (sLastFrame == frame) {
+        return;
+    }
+    sLastFrame = frame;
+    // Callers may already have queued SetNextWindow* calls for their own window; keep them for it.
+    ImGuiContext& g = *GImGui;
+    const ImGuiNextWindowData callerNextWindow = g.NextWindowData;
+    g.NextWindowData.ClearFlags();
+    ImGui::SetNextWindowPos(GetSecondaryPos(), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(GetSecondarySize(), ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::Begin("##SecondaryScreenTrackerDock", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus |
+                     ImGuiWindowFlags_NoNavFocus | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+                     ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleVar(3);
+    ImGui::DockSpace(TrackerDockId(), ImVec2(0.0f, 0.0f),
+                     ImGuiDockNodeFlags_NoUndocking | ImGuiDockNodeFlags_NoDockingSplit |
+                         ImGuiDockNodeFlags_NoResize | ImGuiDockNodeFlags_NoWindowMenuButton |
+                         ImGuiDockNodeFlags_NoCloseButton | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::End();
+    g.NextWindowData = callerNextWindow;
+}
+} // namespace
+
+bool DockOnSecondary(const char* windowName) {
+    if (windowName == nullptr) {
+        return false;
+    }
+    auto ctx = Ship::Context::GetRawInstance();
+    const bool dockEnabled = ctx == nullptr || ctx->GetConsoleVariables() == nullptr ||
+                             ctx->GetConsoleVariables()->GetInteger(CVAR_SECONDARY_SCREEN_TRACKER_DOCK, 1) != 0;
+    const bool dock = IsActive() && dockEnabled;
+    if (!dock) {
+        ImGuiWindow* window = ImGui::FindWindowByName(windowName);
+        if (window != nullptr && window->DockId == TrackerDockId()) {
+            // Docking turned off or the secondary display went away: float it again on the game display.
+            ImGui::SetNextWindowDockID(0, ImGuiCond_Always);
+            ImGui::SetNextWindowPos(ImVec2(40.0f, 40.0f), ImGuiCond_Always);
+        }
+        return false;
+    }
+    DrawTrackerDockHost();
+    ImGui::SetNextWindowDockID(TrackerDockId(), ImGuiCond_Always);
+    return true;
+}
+
+void PlaceOnSecondary(const char* windowName) {
+    if (!IsActive() || windowName == nullptr) {
+        return;
+    }
+    if (!sPlacedOnSecondary.insert(windowName).second) {
+        return; // placed once this session already; after that it stays wherever the user puts it
+    }
+    ImGuiWindow* window = ImGui::FindWindowByName(windowName);
+    if (window != nullptr && (window->DockIsActive || ContainsPoint(window->Pos))) {
+        return; // docked, or already on the second display (e.g. restored from imgui.ini)
+    }
+    const ImVec2 areaPos = GetSecondaryPos();
+    const ImVec2 areaSize = GetSecondarySize();
+    const float margin = 8.0f;
+    const ImVec2 size = (window != nullptr && window->Size.x > 1.0f) ? window->Size : ImVec2(320.0f, 320.0f);
+    if (sShelfCursor.x < 0.0f) {
+        sShelfCursor = ImVec2(areaPos.x + margin, areaPos.y + margin);
+    }
+    // Shelf packing: left to right, wrapping to a new row when the display's width is used up.
+    if (sShelfCursor.x + size.x > areaPos.x + areaSize.x - margin && sShelfCursor.x > areaPos.x + margin) {
+        sShelfCursor.x = areaPos.x + margin;
+        sShelfCursor.y += sShelfHeight + margin;
+        sShelfHeight = 0.0f;
+    }
+    // Past the bottom edge: wrap to the top again rather than off-screen (windows overlap instead).
+    if (sShelfCursor.y + std::min(size.y, areaSize.y) > areaPos.y + areaSize.y) {
+        sShelfCursor = ImVec2(areaPos.x + margin, areaPos.y + margin);
+        sShelfHeight = 0.0f;
+    }
+    ImGui::SetNextWindowPos(sShelfCursor, ImGuiCond_Always);
+    sShelfCursor.x += size.x + margin;
+    sShelfHeight = std::max(sShelfHeight, size.y);
+}
+#endif
 
 } // namespace SecondaryScreen
 } // namespace Ship

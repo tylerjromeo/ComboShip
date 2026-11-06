@@ -1,3 +1,6 @@
+#ifdef COMBO_BUILD
+#include <ship/window/gui/SecondaryScreen.h>
+#endif
 #include "randomizer_tracker_windows.h"
 
 #include <cstring>
@@ -28,6 +31,22 @@ bool BeginFloatWindows(const std::string& UniqueName, bool* open, const Color_RG
                        TrackerWindowType windowType, bool draggable, ImGuiWindowFlags flags) {
     ImGuiWindowFlags windowFlags = flags;
 
+#ifdef COMBO_BUILD
+    // ComboShip (dual-screen Android): list trackers dock as tabs on the second display; the others are
+    // moved there once. Docked windows can't be floating overlays.
+    // Docked tabs sit next to MM's and ComboShip's, so they say which game they're for. "Label###ID"
+    // changes only the visible text; the docked window keeps one stable ImGui identity.
+    const bool listTracker =
+        UniqueName == "Check Tracker" || UniqueName == "Entrance Tracker" || UniqueName == "Hint Tracker";
+    const std::string dockedName = "OoT " + UniqueName + "###" + UniqueName;
+    const bool dockedOnSecondScreen = listTracker && Ship::SecondaryScreen::DockOnSecondary(dockedName.c_str());
+    if (dockedOnSecondScreen) {
+        windowType = TRACKER_WINDOW_WINDOW;
+    }
+#else
+    const bool dockedOnSecondScreen = false;
+#endif
+
     if (windowFlags == 0) {
         windowFlags |= ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_NoFocusOnAppearing;
     }
@@ -42,12 +61,22 @@ bool BeginFloatWindows(const std::string& UniqueName, bool* open, const Color_RG
         }
     }
     ImVec4 bgColVec = VecFromRGBA8(bgCol);
-    if (IsDockedToMainDeck(UniqueName)) {
+    if (IsDockedToMainDeck(UniqueName) || dockedOnSecondScreen) {
         bgColVec.w = 1.0f;
     }
     ImGui::PushStyleColor(ImGuiCol_WindowBg, bgColVec);
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+#ifdef COMBO_BUILD
+    if (!dockedOnSecondScreen) {
+        Ship::SecondaryScreen::PlaceOnSecondary(UniqueName.c_str()); // ComboShip: trackers start on the second display
+    }
+#endif
+#ifdef COMBO_BUILD
+    if (dockedOnSecondScreen) {
+        return ImGui::Begin(dockedName.c_str(), open, windowFlags);
+    }
+#endif
     return ImGui::Begin(UniqueName.c_str(), open, windowFlags);
 }
 

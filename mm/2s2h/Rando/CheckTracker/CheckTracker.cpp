@@ -1,4 +1,7 @@
 
+#ifdef COMBO_BUILD
+#include <ship/window/gui/SecondaryScreen.h>
+#endif
 #include "CheckTracker.h"
 #include <fast/Fast3dGui.h>
 #include "2s2h/Rando/Logic/Logic.h"
@@ -576,14 +579,21 @@ comboSkipVisibilityGates:;
     // Shared "Window type" (gCombo.CheckTracker.WindowType is canonical, see ComboTrackerBridge):
     // floating = borderless overlay like the item tracker; window (default) = the upstream look.
     ImGuiWindowFlags comboWinFlags = ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing;
-    if (CVarGetInteger("gCombo.CheckTracker.WindowType", 1) == 0) {
+    // Dual-screen Android: dock as a tab on the second display (never a floating overlay there).
+    // Its docked tab is labelled for the game ("Label###ID": only the visible text differs).
+    constexpr const char* kDockedName = "MM Check Tracker###Check Tracker##MM";
+    const bool dockedOnSecondScreen = Ship::SecondaryScreen::DockOnSecondary(kDockedName);
+    if (!dockedOnSecondScreen && CVarGetInteger("gCombo.CheckTracker.WindowType", 1) == 0) {
         comboWinFlags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoDocking;
         // ComboShip (#98): pin floating overlays only — their own viewport renders force-opaque (black
         // during the hold-to-swap peek). Windowed ones stay unpinned so they can leave the main window.
         ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
     }
     // ComboShip: distinct ImGui identity (##MM) so OOT's and MM's check trackers can show together.
-    ImGui::Begin("Check Tracker##MM", nullptr, comboWinFlags);
+    if (!dockedOnSecondScreen) {
+        Ship::SecondaryScreen::PlaceOnSecondary("Check Tracker##MM"); // trackers start on the second display
+    }
+    ImGui::Begin(dockedOnSecondScreen ? kDockedName : "Check Tracker##MM", nullptr, comboWinFlags);
 #else
     ImGui::Begin("Check Tracker", nullptr, ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
 #endif

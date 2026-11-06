@@ -1,4 +1,5 @@
 // combo/gui/ComboTimersWindow.cpp — see ComboTimersWindow.h
+#include <ship/window/gui/SecondaryScreen.h>
 #include "ComboTimersWindow.h"
 #include "ComboForeground.h"    // foreground game gates the OOT-only rows
 #include "ComboTrackerCommon.h" // OotActiveSlot + the SetTracker CVar/window lever
@@ -326,6 +327,7 @@ void ComboTimersWindow::Draw() {
     ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
     ImGui::SetNextWindowPos(ImVec2(20.0f, 20.0f), ImGuiCond_FirstUseEver);
+    Ship::SecondaryScreen::PlaceOnSecondary(kWindowName); // starts on the second display (dual-screen Android)
     if (ImGui::Begin(kWindowName, nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |

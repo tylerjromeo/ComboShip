@@ -1,4 +1,5 @@
 // combo/gui/ComboHintTracker.cpp — see ComboHintTracker.h
+#include <ship/window/gui/SecondaryScreen.h>
 #include "ComboHintTracker.h"
 #include "ComboExport.h"
 #include "ComboForeground.h"  // foreground game for the OnlyPaused gate
@@ -451,7 +452,7 @@ void ComboHintTrackerWindow::Draw() {
     // comboui's per-module GImGui must point at the shared context (same pattern as ComboMenu).
     ImGui::SetCurrentContext(ctx->GetWindow()->GetGui()->GetImGuiContext());
 
-    const bool floating = CVarGetInteger(kCvarWindowType, kDefaultWindowType) == 0;
+    bool floating = CVarGetInteger(kCvarWindowType, kDefaultWindowType) == 0;
     // OnlyPaused follows the FOREGROUND game's pause state (the dormant game's is stale), and only
     // applies to the floating overlay — a real window the player opened stays open.
     if (floating && CVarGetInteger(kCvarOnlyPaused, 0) != 0 &&
@@ -461,6 +462,11 @@ void ComboHintTrackerWindow::Draw() {
     }
 
     ImGuiWindowFlags flags = 0;
+    // Dual-screen Android: dock as a tab on the second display (never a floating overlay there).
+    const bool dockedOnSecondScreen = Ship::SecondaryScreen::DockOnSecondary("Hint Tracker##Combo");
+    if (dockedOnSecondScreen) {
+        floating = false;
+    }
     // Only the real window gets a close box (mirrors GuiWindow::Draw); the chrome-less overlay has no
     // title bar to put one in, so it stays nullptr there.
     bool* pOpen = &mIsVisible;
@@ -474,6 +480,9 @@ void ComboHintTrackerWindow::Draw() {
         ImGui::SetNextWindowSize(ImVec2(500.0f, 600.0f), ImGuiCond_FirstUseEver);
     }
     // Distinct ImGui/Gui-map identity from OOT's native "Hint Tracker"; the "##" tail is not displayed.
+    if (!dockedOnSecondScreen) {
+        Ship::SecondaryScreen::PlaceOnSecondary("Hint Tracker##Combo"); // starts on the second display
+    }
     if (ImGui::Begin("Hint Tracker##Combo", pOpen, flags)) {
         DrawElement();
     }
