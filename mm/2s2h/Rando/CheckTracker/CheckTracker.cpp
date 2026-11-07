@@ -517,9 +517,22 @@ void CheckTrackerDrawNonLogicalList() {
                     ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::IsItemHovered()
                                                                           ? IM_COL32(255, 255, 0, 128)
                                                                           : IM_COL32(255, 255, 255, 0));
+#ifdef COMBO_BUILD
+                    // ComboShip: toggle on release, and only for a tap that didn't move. IsItemClicked
+                    // fires on press, so on the touch screen every scroll gesture skipped the check the
+                    // finger first landed on (the scroll is only recognized after the press).
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+                        ImGui::GetIO().MouseDragMaxDistanceSqr[ImGuiMouseButton_Left] < 10.0f * 10.0f &&
+                        ImGui::IsMouseHoveringRect(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), false) &&
+                        ImGui::GetIO().MouseClickedPos[ImGuiMouseButton_Left].y >= ImGui::GetItemRectMin().y &&
+                        ImGui::GetIO().MouseClickedPos[ImGuiMouseButton_Left].y < ImGui::GetItemRectMax().y) {
+                        randoSaveCheck.skipped = !randoSaveCheck.skipped;
+                    }
+#else
                     if (ImGui::IsItemClicked()) {
                         randoSaveCheck.skipped = !randoSaveCheck.skipped;
                     }
+#endif
                     ImGui::TableNextColumn();
                 }
                 ImGui::EndTable();

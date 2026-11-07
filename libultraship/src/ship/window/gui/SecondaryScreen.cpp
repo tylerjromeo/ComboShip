@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <mutex>
 #include <string>
 #include <unordered_set>
 
@@ -68,6 +69,31 @@ ImVec2 GetSecondaryCenter() {
     return ImVec2(sSecondaryPos.x + sSecondarySize.x * 0.5f, sSecondaryPos.y + sSecondarySize.y * 0.5f);
 }
 
+namespace {
+bool StatusBarEnabled() {
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetConsoleVariables() == nullptr) {
+        return true;
+    }
+    return ctx->GetConsoleVariables()->GetInteger(CVAR_SECONDARY_SCREEN_STATUS_BAR, 1) != 0;
+}
+
+float StatusBarHeight() {
+    if (!sFrameActive || !StatusBarEnabled() || GImGui == nullptr) {
+        return 0.0f;
+    }
+    return std::floor(ImGui::GetFontSize() + 8.0f);
+}
+} // namespace
+
+ImVec2 GetSecondaryWorkPos() {
+    return ImVec2(sSecondaryPos.x, sSecondaryPos.y + StatusBarHeight());
+}
+
+ImVec2 GetSecondaryWorkSize() {
+    return ImVec2(sSecondarySize.x, std::max(0.0f, sSecondarySize.y - StatusBarHeight()));
+}
+
 bool ContainsPoint(ImVec2 point) {
     return sFrameActive && point.x >= sSecondaryPos.x && point.y >= sSecondaryPos.y &&
            point.x < sSecondaryPos.x + sSecondarySize.x && point.y < sSecondaryPos.y + sSecondarySize.y;
@@ -114,6 +140,69 @@ void PlaceOnPrimary(const char* windowName) {
 }
 
 namespace {
+std::mutex sTabRequestMutex;
+std::string sTabRequest;
+int sTabRequestFrames = 0;
+
+ImGuiID TrackerDockId();
+
+// The tab picked by SelectSecondaryTab stays picked until the user taps the tab bar. ImGui itself
+// moves the selection when tabs come and go (it selects newly appearing tabs, and restores the old
+// selection when the tab bar is rebuilt during a game switch), which used to snap it back to some
+// other tracker. Only a real tap on the tab bar counts as the user choosing.
+std::string sStickyTab;
+int sLastTabBarTapFrame = -1000;
+
+// Render thread, inside DrawTrackerDockHost (after the DockSpace call, so this frame's tab bar
+// update has already happened).
+void ApplyTabRequest() {
+    ImGuiDockNode* node = ImGui::DockBuilderGetNode(TrackerDockId());
+    ImGuiTabBar* tabBar = node != nullptr ? node->TabBar : nullptr;
+    const int frame = ImGui::GetFrameCount();
+    if (tabBar != nullptr && ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
+        tabBar->BarRect.Contains(ImGui::GetIO().MousePos)) {
+        sLastTabBarTapFrame = frame;
+    }
+
+    std::string request;
+    {
+        std::lock_guard<std::mutex> lock(sTabRequestMutex);
+        request = sTabRequest;
+        if (!request.empty()) {
+            sStickyTab = request; // a new request replaces the old sticky tab
+            sLastTabBarTapFrame = -1000;
+        }
+    }
+    if (sStickyTab.empty()) {
+        return;
+    }
+
+    ImGuiWindow* window = ImGui::FindWindowByName(sStickyTab.c_str());
+    const bool docked = window != nullptr && window->DockIsActive && window->DockNode == node && tabBar != nullptr &&
+                        ImGui::TabBarFindTabByID(tabBar, window->TabId) != nullptr;
+    if (!request.empty()) {
+        // Handed over to sStickyTab; a fresh request only needs to survive until its window shows up.
+        if (docked || ++sTabRequestFrames >= 600) {
+            std::lock_guard<std::mutex> lock(sTabRequestMutex);
+            if (sTabRequest == request) {
+                sTabRequest.clear();
+            }
+        }
+    }
+    if (!docked || tabBar->SelectedTabId == window->TabId) {
+        return; // not shown yet (keeps waiting), or already the selected tab
+    }
+
+    // A tap on the tab bar in the last few frames: the user picked another tab. Stop sticking.
+    if (frame - sLastTabBarTapFrame <= 30) {
+        sStickyTab.clear();
+        return;
+    }
+    tabBar->NextSelectedTabId = window->TabId;
+    tabBar->SelectedTabId = window->TabId;
+    node->SelectedTabId = window->TabId;
+}
+
 ImGuiID TrackerDockId() {
     return ImHashStr("SecondaryScreenTrackerDockSpace");
 }
@@ -132,8 +221,8 @@ void DrawTrackerDockHost() {
     ImGuiContext& g = *GImGui;
     const ImGuiNextWindowData callerNextWindow = g.NextWindowData;
     g.NextWindowData.ClearFlags();
-    ImGui::SetNextWindowPos(GetSecondaryPos(), ImGuiCond_Always);
-    ImGui::SetNextWindowSize(GetSecondarySize(), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(GetSecondaryWorkPos(), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(GetSecondaryWorkSize(), ImGuiCond_Always);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
@@ -149,6 +238,7 @@ void DrawTrackerDockHost() {
                          ImGuiDockNodeFlags_NoResize | ImGuiDockNodeFlags_NoWindowMenuButton |
                          ImGuiDockNodeFlags_NoCloseButton | ImGuiDockNodeFlags_PassthruCentralNode);
     ImGui::End();
+    ApplyTabRequest();
     g.NextWindowData = callerNextWindow;
 }
 } // namespace
@@ -175,6 +265,15 @@ bool DockOnSecondary(const char* windowName) {
     return true;
 }
 
+void SelectSecondaryTab(const char* windowName) {
+    if (windowName == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(sTabRequestMutex);
+    sTabRequest = windowName;
+    sTabRequestFrames = 0;
+}
+
 void PlaceOnSecondary(const char* windowName) {
     if (!IsActive() || windowName == nullptr) {
         return;
@@ -186,8 +285,8 @@ void PlaceOnSecondary(const char* windowName) {
     if (window != nullptr && (window->DockIsActive || ContainsPoint(window->Pos))) {
         return; // docked, or already on the second display (e.g. restored from imgui.ini)
     }
-    const ImVec2 areaPos = GetSecondaryPos();
-    const ImVec2 areaSize = GetSecondarySize();
+    const ImVec2 areaPos = GetSecondaryWorkPos();
+    const ImVec2 areaSize = GetSecondaryWorkSize();
     const float margin = 8.0f;
     const ImVec2 size = (window != nullptr && window->Size.x > 1.0f) ? window->Size : ImVec2(320.0f, 320.0f);
     if (sShelfCursor.x < 0.0f) {
@@ -223,8 +322,12 @@ void PlaceOnSecondary(const char* windowName) {
 #include <android/native_window_jni.h>
 #include <jni.h>
 
+#include <SDL2/SDL.h>
+
 #include <chrono>
 #include <condition_variable>
+#include <cstdio>
+#include <ctime>
 #include <mutex>
 #include <vector>
 
@@ -428,7 +531,91 @@ void NewFrame() {
     }
 }
 
+namespace {
+// Clock + battery strip along the top of the secondary display. Drawn on the foreground draw list so
+// nothing covers it; the dock host and menus start below it (GetSecondaryWorkPos).
+void DrawStatusBar() {
+    const float height = StatusBarHeight();
+    if (height <= 0.0f) {
+        return;
+    }
+
+    // Battery: SDL asks Android's sticky ACTION_BATTERY_CHANGED intent over JNI, so poll it rarely.
+    static double sNextBatteryPoll = 0.0;
+    static int sBatteryPct = -1;
+    static SDL_PowerState sPowerState = SDL_POWERSTATE_UNKNOWN;
+    const double now = ImGui::GetTime();
+    if (now >= sNextBatteryPoll) {
+        sNextBatteryPoll = now + 20.0;
+        int secs = -1;
+        int pct = -1;
+        sPowerState = SDL_GetPowerInfo(&secs, &pct);
+        sBatteryPct = pct;
+    }
+
+    char clock[32] = "";
+    const std::time_t t = std::time(nullptr);
+    std::tm local{};
+    if (localtime_r(&t, &local) != nullptr) {
+        auto ctx = Ship::Context::GetRawInstance();
+        const bool use24h = ctx != nullptr && ctx->GetConsoleVariables() != nullptr &&
+                            ctx->GetConsoleVariables()->GetInteger(CVAR_SECONDARY_SCREEN_CLOCK_24H, 0) != 0;
+        if (use24h) {
+            std::snprintf(clock, sizeof(clock), "%02d:%02d", local.tm_hour, local.tm_min);
+        } else {
+            const int hour12 = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
+            std::snprintf(clock, sizeof(clock), "%d:%02d %s", hour12, local.tm_min, local.tm_hour < 12 ? "AM" : "PM");
+        }
+    }
+
+    char battery[32] = "";
+    if (sBatteryPct >= 0) {
+        const bool charging = sPowerState == SDL_POWERSTATE_CHARGING || sPowerState == SDL_POWERSTATE_CHARGED;
+        std::snprintf(battery, sizeof(battery), "%s%d%%", charging ? "+ " : "", sBatteryPct);
+    }
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList(ImGui::GetMainViewport());
+    const ImVec2 p0 = sSecondaryPos;
+    const ImVec2 p1 = ImVec2(sSecondaryPos.x + sSecondarySize.x, sSecondaryPos.y + height);
+    draw->AddRectFilled(p0, p1, IM_COL32(16, 16, 20, 255));
+    draw->AddLine(ImVec2(p0.x, p1.y - 1.0f), ImVec2(p1.x, p1.y - 1.0f), IM_COL32(70, 70, 80, 255));
+
+    const float pad = 10.0f;
+    const float textY = p0.y + std::floor((height - ImGui::GetFontSize()) * 0.5f);
+    const ImU32 textCol = IM_COL32(230, 230, 230, 255);
+    draw->AddText(ImVec2(p0.x + pad, textY), textCol, clock);
+
+    if (battery[0] != '\0') {
+        const ImVec2 textSize = ImGui::CalcTextSize(battery);
+        // A small battery glyph drawn with primitives (the default font has no battery icon).
+        const float iconH = std::floor(ImGui::GetFontSize() * 0.6f);
+        const float iconW = std::floor(iconH * 1.9f);
+        const float iconX = p1.x - pad - iconW - 3.0f;
+        const float iconY = p0.y + std::floor((height - iconH) * 0.5f);
+        ImU32 fill = IM_COL32(110, 200, 110, 255);
+        if (sBatteryPct <= 15) {
+            fill = IM_COL32(230, 80, 70, 255);
+        } else if (sBatteryPct <= 30) {
+            fill = IM_COL32(230, 190, 70, 255);
+        }
+        draw->AddRect(ImVec2(iconX, iconY), ImVec2(iconX + iconW, iconY + iconH), textCol, 2.0f, 0, 1.5f);
+        draw->AddRectFilled(ImVec2(iconX + iconW, iconY + iconH * 0.3f), ImVec2(iconX + iconW + 3.0f, iconY + iconH * 0.7f),
+                            textCol);
+        const float inner = (iconW - 4.0f) * std::clamp(sBatteryPct, 0, 100) / 100.0f;
+        if (inner > 0.0f) {
+            draw->AddRectFilled(ImVec2(iconX + 2.0f, iconY + 2.0f), ImVec2(iconX + 2.0f + inner, iconY + iconH - 2.0f),
+                                fill, 1.0f);
+        }
+        draw->AddText(ImVec2(iconX - 6.0f - textSize.x, textY), textCol, battery);
+    }
+}
+} // namespace
+
 void AfterNewFrame() {
+    if (sFrameActive) {
+        DrawStatusBar();
+    }
+
     static bool sTracking = false;
     static bool sScrolling = false;
     static ImGuiID sTargetId = 0;

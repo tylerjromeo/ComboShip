@@ -9,6 +9,7 @@
 
 #include <libultraship/libultraship.h> // Ship::Context / Gui + CVarGet/SetInteger
 #include "ComboExport.h"
+#include <ship/window/gui/SecondaryScreen.h> // SelectSecondaryTab (dual-screen tracker tabs)
 #include <memory>               // std::weak_ptr (foreground-only window handles)
 #include "ComboForeground.h"    // ComboUI::GetForegroundGame (cached below)
 #include "ComboAudioBridge.h"   // ComboAudio::SyncAllToMM (on MM entry)
@@ -151,6 +152,14 @@ extern "C" COMBO_EXPORT void ComboUI_OnForegroundGame(int game) {
 
     // ComboShip (#165): persist any pending note text at the transition.
     ComboNotes::FlushPending();
+
+    // Dual-screen Android: show the entered game's check tracker tab on the second display. The
+    // names are the docked "Label###ID" names from randomizer_tracker_windows.cpp / CheckTracker.cpp.
+    // Off with gCombo.DualScreen.AutoTrackerTab = 0. No-op without a second display.
+    if (CVarGetInteger("gCombo.DualScreen.AutoTrackerTab", 1) != 0) {
+        Ship::SecondaryScreen::SelectSecondaryTab(fg == 1 ? "MM Check Tracker###Check Tracker##MM"
+                                                          : "OoT Check Tracker###Check Tracker");
+    }
 }
 
 // Launcher, just before shutdown: restore the backgrounded game's settings-window CVars so they

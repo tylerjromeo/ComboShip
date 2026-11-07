@@ -41,8 +41,9 @@ inline void GameRect(ImVec2& pos, ImVec2& size) {
 // Where menus and modal screens belong: the second display when present, else the game display.
 inline void MenuRect(ImVec2& pos, ImVec2& size) {
     if (IsActive()) {
-        pos = Ship::SecondaryScreen::GetSecondaryPos();
-        size = Ship::SecondaryScreen::GetSecondarySize();
+        // Below the clock/battery strip along the second display's top edge.
+        pos = Ship::SecondaryScreen::GetSecondaryWorkPos();
+        size = Ship::SecondaryScreen::GetSecondaryWorkSize();
         return;
     }
     GameRect(pos, size);

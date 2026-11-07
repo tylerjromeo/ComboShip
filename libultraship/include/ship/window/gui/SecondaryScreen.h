@@ -40,6 +40,13 @@ ImVec2 GetSecondaryPos();
 ImVec2 GetSecondarySize();
 ImVec2 GetSecondaryCenter();
 
+// The secondary rect minus the status strip (clock + battery) along its top edge: where windows
+// placed on the secondary display should go. Equals GetSecondaryPos/Size when the strip is off.
+#define CVAR_SECONDARY_SCREEN_STATUS_BAR "gSettings.SecondaryScreen.StatusBar"   // default 1
+#define CVAR_SECONDARY_SCREEN_CLOCK_24H "gSettings.SecondaryScreen.Clock24h"     // default 0
+ImVec2 GetSecondaryWorkPos();
+ImVec2 GetSecondaryWorkSize();
+
 // True if the given canvas point lies on the secondary display (always false while inactive).
 bool ContainsPoint(ImVec2 point);
 
@@ -63,6 +70,11 @@ void PlaceOnSecondary(const char* windowName);
 // (NoDocking, a floating-overlay look). Returns false otherwise.
 #define CVAR_SECONDARY_SCREEN_TRACKER_DOCK "gSettings.SecondaryScreen.TrackerDock" // default 1
 bool DockOnSecondary(const char* windowName);
+
+// ComboShip: bring a window docked by DockOnSecondary to the front of the second display's tab
+// bar (without focusing it, so game input is untouched). Applied on a later frame, once the window
+// exists and is docked there; dropped after ~2 s if it never shows up. Safe from any thread.
+void SelectSecondaryTab(const char* windowName);
 
 // ComboShip: for overlays that belong on the game display (item trackers). Call right before
 // ImGui::Begin(windowName, ...) every frame: any part of the window past the game display's right
