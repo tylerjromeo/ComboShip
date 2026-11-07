@@ -3313,11 +3313,13 @@ void Interpreter::Gfxs2dexRecyCopy(F3DuObjSprite* spr) {
 void* Interpreter::SegAddr(uintptr_t w1) {
     // Segmented?
     if (w1 & 1) {
-        uint32_t segNum = (uint32_t)(w1 >> 24);
+        uintptr_t segNum = w1 >> 24;
 
         uint32_t offset = w1 & 0x00FFFFFE;
 
-        if (mSegmentPointers[segNum] != 0) {
+        // A real pointer that happens to be odd (e.g. an unaligned u8 buffer) is not a segmented
+        // address; indexing with it would read far past mSegmentPointers.
+        if (segNum < MAX_SEGMENT_POINTERS && mSegmentPointers[segNum] != 0) {
             return (void*)(mSegmentPointers[segNum] + offset);
         } else {
             return (void*)w1;

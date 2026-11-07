@@ -889,7 +889,8 @@ void ShadePaletteTintRevert(const char* path, uint32_t begin, uint32_t end) {
     InvalidateNativeTextureCache(path, target);
 }
 
-static uint8_t sKafeiHairTlut[256 * 2];
+// Even-aligned: an odd address in G_SETTIMG reads as a segmented address (bit 0) in LUS.
+alignas(8) static uint8_t sKafeiHairTlut[256 * 2];
 static OriginalTextureData sKafeiHairTlutOriginal;
 static bool sKafeiHairTlutInitialized = false;
 static const char* kKafeiBody2TlutPath = "objects/object_test3/gKafeiBody2TLUT";
