@@ -198,6 +198,14 @@ void ApplyTabRequest() {
         sStickyTab.clear();
         return;
     }
+    ImGuiContext& g = *GImGui;
+    if (g.NavWindow != nullptr && g.NavWindow->RootWindow != nullptr && g.NavWindow->RootWindow->DockNode == node) {
+        // Another tab's window has focus (the user tapped it earlier). ImGui re-selects the focused
+        // window's tab every frame, so just setting the selection fought it and flickered between the
+        // two each frame. Move focus to our window instead - the same thing a tap on its tab does.
+        ImGui::FocusWindow(window);
+        return;
+    }
     tabBar->NextSelectedTabId = window->TabId;
     tabBar->SelectedTabId = window->TabId;
     node->SelectedTabId = window->TabId;
