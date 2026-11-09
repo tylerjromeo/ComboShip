@@ -206,6 +206,11 @@ if(ANDROID)
     # Keep debug APKs playable on-device while retaining file/line crash symbols (as SoH Android).
     set(CMAKE_C_FLAGS_DEBUG "-O2 -gline-tables-only")
     set(CMAKE_CXX_FLAGS_DEBUG "-O2 -gline-tables-only")
+    # clang fuses a*b+c into FMA by default on arm64; x86 desktop builds don't. The decomp's
+    # collision math relies on non-fused rounding at exact edge cases (e.g. Obj_Blockstop's line
+    # test starting exactly on the pushed block's bottom face: unfused = 0 -> hit, fused = -2e-7
+    # -> miss), so with FMA the Spirit/GTG silver blocks never set their "solved" switch flag.
+    add_compile_options(-ffp-contract=off)
 endif()
 
 ################################################################################
