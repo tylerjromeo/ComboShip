@@ -4765,6 +4765,30 @@ extern "C" COMBO_EXPORT uint64_t MM_GetPlaytimeMs(void) {
     return total;
 }
 
+// ComboShip: MM's half of the combined check count overlay — shuffled checks, and how many of them are
+// obtained or skipped (MM's own tracker counts the same way). Nonzero only while a rando save is
+// resident (fileNum 0..2 and IS_RANDO); the dormant live save counts too.
+extern "C" COMBO_EXPORT int MM_GetCheckCounts(int* found, int* total) {
+    if (gSaveContext.fileNum > 2 || !IS_RANDO) {
+        return 0;
+    }
+    int f = 0;
+    int t = 0;
+    for (auto& [id, check] : Rando::StaticData::Checks) {
+        const auto& saved = RANDO_SAVE_CHECKS[check.randoCheckId];
+        if (!saved.shuffled) {
+            continue;
+        }
+        t++;
+        if (saved.obtained || saved.skipped) {
+            f++;
+        }
+    }
+    *found = f;
+    *total = t;
+    return 1;
+}
+
 extern "C" COMBO_EXPORT int32_t MM_MenuEvalDisabled(int32_t i, const char** outReason) {
     ComboMenuContext::UseSharedImGuiContext();
     Ship::ResourceManagerScope rmScope(Ship::CrossRMRegistry::Get("mm"));

@@ -26,4 +26,8 @@ void SetMasterVisible(int tracker, bool visible);
 // (paused) so a missing module/export degrades to always-show. Shared with the combo Hint Tracker.
 bool ForegroundPaused(int fg);
 
+// Load the slot's MM save into MM's dormant gSaveContext if MM has not been foreground yet (once per
+// slot), so dormant readers see the real save instead of boot defaults. No-op after any MM visit.
+void EnsureMmSaveLoaded();
+
 } // namespace ComboTracker

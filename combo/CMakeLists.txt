@@ -40,6 +40,7 @@ set(COMBOUI_SOURCES
     gui/ComboNotesWindow.cpp
     gui/ComboHintTracker.cpp
     gui/ComboTimersWindow.cpp
+    gui/ComboCheckCountWindow.cpp
     gui/ComboCosmeticsSync.cpp
     gui/ComboFilePickerAndroid.cpp # empty unless __ANDROID__
 )

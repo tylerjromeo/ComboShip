@@ -319,6 +319,10 @@ void SwapWindow::Draw() {
 
 } // namespace
 
+void ComboTracker::EnsureMmSaveLoaded() {
+    EnsureMmSaveLoadedForDormantDraw();
+}
+
 bool ComboTracker::ForegroundPaused(int fg) {
     static int (*sFn[2])(void) = {};
     static bool sTried[2] = {};

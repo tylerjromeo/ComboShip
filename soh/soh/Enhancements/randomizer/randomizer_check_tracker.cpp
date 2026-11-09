@@ -2867,3 +2867,24 @@ void RegisterCheckTrackerWidgets() {
 
 static RegisterMenuInitFunc menuInitFunc(RegisterCheckTrackerWidgets);
 } // namespace CheckTracker
+
+#ifdef COMBO_BUILD
+#include "ComboExport.h"
+// ComboShip: OOT's half of the combined check count overlay — the same Checked / Total figures this
+// tracker's header shows, summed live from the per-area counts. These survive while MM is foreground
+// (no OnExitGame on a game switch) and are rebuilt by CheckTrackerLoadGame on return.
+extern "C" COMBO_EXPORT int SOH_GetCheckCounts(int* found, int* total) {
+    if (!CheckTracker::initialized || !IS_RANDO) {
+        return 0;
+    }
+    int f = 0;
+    int t = 0;
+    for (int i = 0; i < RCAREA_INVALID; i++) {
+        f += CheckTracker::areaChecksGotten[i];
+        t += CheckTracker::areaCheckTotals[i];
+    }
+    *found = f;
+    *total = t;
+    return 1;
+}
+#endif

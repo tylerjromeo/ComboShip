@@ -13,6 +13,7 @@
 #include "ComboNotesWindow.h"       // combo-owned cross-game Personal Notes window
 #include "ComboHintTracker.h"       // combo-owned unified Hint Tracker (#164)
 #include "ComboTimersWindow.h"      // combo-owned overlay timers (#173)
+#include "ComboCheckCountWindow.h"  // combo-owned cross-game check count overlay
 #include "rando/CrossForeign.h"     // ComboRando::ContainerPath — anchored save-container location
 #include "rando/ComboPlaythrough.h" // plando: ParseSpoilerPlacements + Suffix/BuildForeignArray + slot paths
 #include <imgui.h>
@@ -681,6 +682,9 @@ void DrawCheckTrackerSharedPanel() {
             changed = true;
         }
         ComboRando::ComboMenu_PopCombobox();
+
+        ImGui::TableSetColumnIndex(1);
+        changed |= ComboRando::DrawCheckCountSettings();
 
         ImGui::EndTable();
     }
@@ -1844,6 +1848,9 @@ extern "C" COMBO_EXPORT void ComboUI_Register(void) {
     // Combo-owned overlay timers (#173). Both games' overlays are retired. MM's window is not
     // registered yet, so only its CVar can be cleared here; the combo window re-asserts each frame.
     ComboRando::RegisterTimersWindow();
+
+    // Combo-owned check count overlay: found/skipped over total shuffled checks, both games.
+    ComboRando::RegisterCheckCountWindow();
     for (const auto& [cvar, name] : { std::pair{ "gOpenWindows.TimeDisplayEnabled", "Additional Timers" },
                                       std::pair{ "gWindows.DisplayOverlay", "Display Overlay" } }) {
         CVarSetInteger(cvar, 0);
