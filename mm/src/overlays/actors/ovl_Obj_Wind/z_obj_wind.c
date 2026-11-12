@@ -71,7 +71,9 @@ static ObjWindStruct D_80B2448C[] = {
     { 400, 60, 2000, 2000, 0 },   { 470, 70, 2000, 1000, 0 },
 };
 
+#ifndef COMBO_BUILD
 static s32 D_80B245CC = -1;
+#endif
 
 void ObjWind_Update(Actor* thisx, PlayState* play) {
     ObjWind* this = (ObjWind*)thisx;
@@ -83,6 +85,12 @@ void ObjWind_Update(Actor* thisx, PlayState* play) {
     f32 upXZ; // reused temp
     f32 distToNearestPoint;
 
+#ifndef COMBO_BUILD
+    // ComboShip: this is a debug-register tuning hook that writes DREG(80..84) back into the static
+    // table every frame. Combo re-runs Regs_Init (zeroing all regs) on every OoT->MM switch, while
+    // D_80B245CC (a static that survives, unlike on N64 where the overlay reloads) still says the
+    // table was already synced — so entry 0 got overwritten with zeros: STT Lava Wind Room updrafts
+    // became 0-length/0-width (no lift, invisible) for the rest of the process.
     if (D_80B245CC != DREG(85)) {
         if ((DREG(85) >= 0) && (DREG(85) < ARRAY_COUNT(D_80B2448C))) {
             DREG(80) = D_80B2448C[DREG(85)].unk_0;
@@ -99,6 +107,7 @@ void ObjWind_Update(Actor* thisx, PlayState* play) {
         D_80B2448C[DREG(85)].unk_6 = DREG(83);
         D_80B2448C[DREG(85)].unk_8 = DREG(84);
     }
+#endif
 
     if ((OBJ_WIND_GET_SWITCH_FLAG(thisx) == 0x7F) || !Flags_GetSwitch(play, OBJ_WIND_GET_SWITCH_FLAG(thisx))) {
         player = GET_PLAYER(play);
