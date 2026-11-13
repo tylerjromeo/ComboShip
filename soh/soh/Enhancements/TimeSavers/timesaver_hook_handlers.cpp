@@ -467,8 +467,12 @@ void TimeSaverOnVanillaBehaviorHandler(GIVanillaBehavior id, bool* should, va_li
                 !(gPlayState->sceneNum == SCENE_ZORAS_RIVER && IS_RANDO && RAND_GET_OPTION(RSK_FROGS_HINT))) {
                 *should = false;
 
-                // We should still come out of a softlock if the setting was changed during forced dialogue
-                if (GET_PLAYER(gPlayState)->csAction != 7) {
+                // We should still come out of a softlock if the setting was changed during forced dialogue.
+                // ComboShip: only when Link is actually held in a csAction. When the dialogue is skipped up front he
+                // was never frozen, and an unconditional 7 forces a running Link through Player_Action_CsAction into
+                // idle: a 3-tick stop (seen at the Gerudo Training Ground entry-room trigger on every scene entry).
+                const u8 csAction = GET_PLAYER(gPlayState)->csAction;
+                if (csAction != PLAYER_CSACTION_NONE && csAction != 7) {
                     Player_SetCsAction(gPlayState, NULL, 7);
                 }
             }
