@@ -2958,6 +2958,10 @@ typedef enum {
     // recognizes it and diverts the real (foreign) item through the cross-world mailbox instead of
     // granting locally. Appended before the terminators so existing RI values (and save data) are unchanged.
     RI_COMBO_FOREIGN,
+    // Infinite Upgrades: never placed directly, a progressive item resolves to one of these.
+    // Appended (not alphabetical) so existing RI values in saves don't shift.
+    RI_QUIVER_INF,
+    RI_BOMB_BAG_INF,
     RI_MAX_TRAP, // Just used for ice trap ice cube model
     RI_MAX,
 } RandoItemId;
@@ -3357,6 +3361,8 @@ typedef enum {
     RO_TRAP_AMOUNT,
     RO_TRIFORCE_PIECES_MAX,
     RO_TRIFORCE_PIECES_REQUIRED,
+    // Appended (not alphabetical): randoSaveOptions is saved by index.
+    RO_INFINITE_UPGRADES,
     RO_MAX,
 } RandoOptionId;
 
@@ -3411,6 +3417,12 @@ typedef enum {
     RO_REMAINS_SHUFFLE_ANYWHERE,
     RO_REMAINS_SHUFFLE_OWN_DUNGEON,
 } RandoOptionRemainsShuffle;
+
+typedef enum {
+    RO_INF_UPGRADES_OFF,
+    RO_INF_UPGRADES_PROGRESSIVE,
+    RO_INF_UPGRADES_CONDENSED_PROGRESSIVE,
+} RandoOptionInfiniteUpgrades;
 
 typedef enum {
     RO_CLOCK_SHUFFLE_RANDOM,
@@ -3507,6 +3519,8 @@ typedef enum {
     RANDO_INF_OBTAINED_SONG_NOCTURNE,
     RANDO_INF_OBTAINED_SONG_PRELUDE,
 #endif
+    RANDO_INF_HAS_INFINITE_QUIVER,
+    RANDO_INF_HAS_INFINITE_BOMB_BAG,
     RANDO_INF_MAX,
 } RandoInf;
 

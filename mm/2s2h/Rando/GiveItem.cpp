@@ -168,6 +168,17 @@ void Rando::GiveItem(RandoItemId randoItemId) {
             Inventory_ChangeUpgrade(UPG_WALLET, 3);
             gSaveContext.rupeeAccumulator = CUR_CAPACITY(UPG_WALLET) - gSaveContext.save.saveInfo.playerData.rupees;
             break;
+        // Infinite Upgrades: the flag drives the refill in MiscBehavior/InfiniteUpgrades.cpp
+        case RI_QUIVER_INF:
+            Flags_SetRandoInf(RANDO_INF_HAS_INFINITE_QUIVER);
+            AMMO(ITEM_BOW) = CUR_CAPACITY(UPG_QUIVER);
+            break;
+        case RI_BOMB_BAG_INF:
+            Flags_SetRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG);
+            AMMO(ITEM_BOMB) = CUR_CAPACITY(UPG_BOMB_BAG);
+            if (INV_CONTENT(ITEM_BOMBCHU) != ITEM_NONE)
+                AMMO(ITEM_BOMBCHU) = CUR_CAPACITY(UPG_BOMB_BAG);
+            break;
         case RI_GS_TOKEN_SWAMP:
             // Set QUEST_QUIVER to match bug mentioned in z_parameter.c
             SET_QUEST_ITEM(QUEST_QUIVER);

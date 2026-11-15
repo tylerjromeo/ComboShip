@@ -103,7 +103,9 @@ void Rando::RemoveItem(RandoItemId randoItemId) {
             Inventory_ChangeUpgrade(UPG_QUIVER, 2);
             break;
         case RI_PROGRESSIVE_BOW:
-            if (CUR_UPG_VALUE(UPG_QUIVER) >= 3) {
+            if (Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_QUIVER)) {
+                RemoveItem(RI_QUIVER_INF);
+            } else if (CUR_UPG_VALUE(UPG_QUIVER) >= 3) {
                 RemoveItem(RI_QUIVER_50);
             } else if (CUR_UPG_VALUE(UPG_QUIVER) >= 2) {
                 RemoveItem(RI_QUIVER_40);
@@ -123,7 +125,9 @@ void Rando::RemoveItem(RandoItemId randoItemId) {
             Inventory_ChangeUpgrade(UPG_BOMB_BAG, 2);
             break;
         case RI_PROGRESSIVE_BOMB_BAG:
-            if (CUR_UPG_VALUE(UPG_BOMB_BAG) >= 3) {
+            if (Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG)) {
+                RemoveItem(RI_BOMB_BAG_INF);
+            } else if (CUR_UPG_VALUE(UPG_BOMB_BAG) >= 3) {
                 RemoveItem(RI_BOMB_BAG_40);
             } else if (CUR_UPG_VALUE(UPG_BOMB_BAG) >= 2) {
                 RemoveItem(RI_BOMB_BAG_30);
@@ -133,6 +137,12 @@ void Rando::RemoveItem(RandoItemId randoItemId) {
             break;
         case RI_WALLET_ADULT:
             Inventory_ChangeUpgrade(UPG_WALLET, 0);
+            break;
+        case RI_QUIVER_INF:
+            Flags_ClearRandoInf(RANDO_INF_HAS_INFINITE_QUIVER);
+            break;
+        case RI_BOMB_BAG_INF:
+            Flags_ClearRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG);
             break;
         case RI_WALLET_GIANT:
             Inventory_ChangeUpgrade(UPG_WALLET, 1);

@@ -71,6 +71,12 @@ std::unordered_map<int32_t, const char*> remainsShuffleOptions = {
     { RO_REMAINS_SHUFFLE_VANILLA, "Vanilla" },
 };
 
+std::unordered_map<int32_t, const char*> infiniteUpgradesOptions = {
+    { RO_INF_UPGRADES_OFF, "Off" },
+    { RO_INF_UPGRADES_PROGRESSIVE, "Progressive" },
+    { RO_INF_UPGRADES_CONDENSED_PROGRESSIVE, "Condensed Progressive" },
+};
+
 std::unordered_map<int32_t, const char*> songShuffleOptions = {
     { RO_SONG_SHUFFLE_ANYWHERE, "Anywhere" },
     { RO_SONG_SHUFFLE_SONG_LOCATIONS, "Song Locations" },
@@ -86,6 +92,7 @@ std::vector<int32_t> incompatibleWithVanilla = {
     RO_PLENTIFUL_ITEMS,
     RO_CLOCK_SHUFFLE,
     RO_SHUFFLE_TYCOON_WALLET,
+    RO_INFINITE_UPGRADES,
 };
 // clang-format on
 
@@ -148,6 +155,7 @@ void ClearIncompatibleSetting() {
             CVarClear(Rando::StaticData::Options[RO_SHUFFLE_SWIM].cvar);
             CVarClear(Rando::StaticData::Options[RO_CLOCK_SHUFFLE].cvar);
             CVarClear(Rando::StaticData::Options[RO_SHUFFLE_TYCOON_WALLET].cvar);
+            CVarClear(Rando::StaticData::Options[RO_INFINITE_UPGRADES].cvar);
             break;
         default:
             break;
@@ -396,6 +404,7 @@ static RegisterShipInitFunc refreshMetricsInit(RefreshMetrics, {
                                                                    "gRando.Options.RO_ACCESS_MOON_MASKS_COUNT",
                                                                    "gRando.Options.RO_ACCESS_MOON_REMAINS_COUNT",
                                                                    "gRando.Options.RO_ACCESS_TRIALS",
+                                                                   "gRando.Options.RO_INFINITE_UPGRADES",
                                                                    "gRando.Options.RO_CLOCK_SHUFFLE_PROGRESSIVE",
                                                                    "gRando.Options.RO_CLOCK_SHUFFLE",
                                                                    "gRando.Options.RO_HINTS_BOSS_REMAINS",
@@ -1024,6 +1033,25 @@ static void DrawItemPoolTab() {
                                                 "Silver Rupee for 1 rupee). When enabled, those rupees can be "
                                                 "purchased any number of times per cycle; otherwise only once "
                                                 "per cycle." } }));
+    {
+        auto infOptions =
+            UIWidgets::ComboboxOptions()
+                .ComponentAlignment(UIWidgets::ComponentAlignment::Right)
+                .LabelPosition(UIWidgets::LabelPosition::Near)
+                .Tooltip("Adds upgrades that keep your arrows or bombs (and Bombchus) full. Capacity doesn't "
+                         "change and logic doesn't use them.\n\n"
+                         "Off - No infinite upgrades.\n\n"
+                         "Progressive - One extra Progressive Bow and Bomb Bag. The copy after the largest "
+                         "quiver or bag is the infinite upgrade.\n\n"
+                         "Condensed Progressive - The second Progressive Bow and Bomb Bag are the infinite "
+                         "upgrades (no larger quivers or bags).");
+        infOptions.disabled = IncompatibleWithLogicSetting(RO_INFINITE_UPGRADES);
+        infOptions.disabledTooltip = "Incompatible with current Logic Setting";
+        UIWidgets::CVarCombobox("Infinite Upgrades", Rando::StaticData::Options[RO_INFINITE_UPGRADES].cvar,
+                                &infiniteUpgradesOptions, infOptions);
+        int32_t infMode = CVarGetInteger(Rando::StaticData::Options[RO_INFINITE_UPGRADES].cvar, RO_INF_UPGRADES_OFF);
+        PoolCountSuffix(infMode == RO_INF_UPGRADES_PROGRESSIVE ? 2 : 0);
+    }
     ImGui::PushStyleColor(ImGuiCol_Text, DIM_TEXT_COLOR);
     ImGui::SeparatorText("Coming Soon");
     ImGui::PopStyleColor();
@@ -1032,8 +1060,6 @@ static void DrawItemPoolTab() {
     CVarCheckbox("Deku Nut Bag", "gPlaceholderBool",
                  CheckboxOptions({ { .disabled = true, .disabledTooltip = "Coming Soon" } }));
     CVarCheckbox("Child Wallet", "gPlaceholderBool",
-                 CheckboxOptions({ { .disabled = true, .disabledTooltip = "Coming Soon" } }));
-    CVarCheckbox("Infinite Upgrades", "gPlaceholderBool",
                  CheckboxOptions({ { .disabled = true, .disabledTooltip = "Coming Soon" } }));
     UIWidgets::EndCard();
 
@@ -1443,6 +1469,20 @@ static void DrawStartingItemsTab() {
                         if (item == RI_PROGRESSIVE_WALLET &&
                             CVarGetInteger(Rando::StaticData::Options[RO_SHUFFLE_TYCOON_WALLET].cvar, 0)) {
                             maxCount = 3;
+                        }
+                        // Infinite Upgrades: allow starting with the whole chain, infinite tier included.
+                        int32_t infMode = CVarGetInteger(Rando::StaticData::Options[RO_INFINITE_UPGRADES].cvar,
+                                                         RO_INF_UPGRADES_OFF);
+                        if (infMode != RO_INF_UPGRADES_OFF) {
+                            bool condensed = infMode == RO_INF_UPGRADES_CONDENSED_PROGRESSIVE;
+                            switch (item) {
+                                case RI_PROGRESSIVE_BOW:
+                                case RI_PROGRESSIVE_BOMB_BAG:
+                                    maxCount = condensed ? 2 : 4;
+                                    break;
+                                default:
+                                    break;
+                            }
                         }
                         if (std::count(setStartingItemsList.begin(), setStartingItemsList.end(), item) < maxCount) {
 

@@ -797,6 +797,9 @@ void Rando::DrawItem(RandoItemId randoItemId, RandoCheckId randoCheckId, Actor* 
         case RI_SINGLE_MAGIC:
         case RI_DOUBLE_MAGIC:
         case RI_TIME_PROGRESSIVE:
+        // Infinite Upgrades draw as the top-tier model; sparkles tell them apart.
+        case RI_QUIVER_INF:
+        case RI_BOMB_BAG_INF:
             DrawSparkles(randoItemId, actor);
             break;
         default:

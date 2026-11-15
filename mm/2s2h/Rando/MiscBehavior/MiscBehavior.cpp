@@ -22,6 +22,7 @@ void Rando::MiscBehavior::OnFileLoad() {
 #endif
     Rando::MiscBehavior::BankSignHint();
     Rando::MiscBehavior::InitTycoonWallet();
+    Rando::MiscBehavior::InitInfiniteUpgrades();
 
     COND_HOOK(OnFlagSet, IS_RANDO, Rando::MiscBehavior::OnFlagSet);
     COND_HOOK(OnSceneFlagSet, IS_RANDO, Rando::MiscBehavior::OnSceneFlagSet);

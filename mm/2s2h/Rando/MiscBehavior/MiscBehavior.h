@@ -49,6 +49,7 @@ void WarpSongs(); // ComboShip (teleport songs): OOT warp songs played in MM soa
 #endif
 void BankSignHint();
 void InitTycoonWallet();
+void InitInfiniteUpgrades();
 
 typedef struct {
     char tex[512];

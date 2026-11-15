@@ -220,6 +220,11 @@ RandoItemId Rando::CurrentTrapItem(RandoCheckId randoCheckId) {
     }
 }
 
+// Infinite Upgrades: the mode for this seed.
+static u32 InfiniteUpgradesMode() {
+    return RANDO_SAVE_OPTIONS[RO_INFINITE_UPGRADES];
+}
+
 bool Rando::IsItemObtainable(RandoItemId randoItemId, RandoCheckId randoCheckId) {
     bool hasObtainedCheck = false;
     if (randoCheckId != RC_UNKNOWN) {
@@ -293,6 +298,8 @@ bool Rando::IsItemObtainable(RandoItemId randoItemId, RandoCheckId randoCheckId)
         case RI_PROGRESSIVE_BOMB_BAG:
             if (hasObtainedCheck) {
                 return false;
+            } else if (InfiniteUpgradesMode() != RO_INF_UPGRADES_OFF) {
+                return !Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG);
             } else if (CUR_UPG_VALUE(UPG_BOMB_BAG) >= 3) {
                 return false;
             }
@@ -315,6 +322,8 @@ bool Rando::IsItemObtainable(RandoItemId randoItemId, RandoCheckId randoCheckId)
         case RI_PROGRESSIVE_BOW:
             if (hasObtainedCheck) {
                 return false;
+            } else if (InfiniteUpgradesMode() != RO_INF_UPGRADES_OFF) {
+                return !Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_QUIVER);
             } else if (CUR_UPG_VALUE(UPG_QUIVER) >= 3) {
                 return false;
             }
@@ -351,6 +360,10 @@ bool Rando::IsItemObtainable(RandoItemId randoItemId, RandoCheckId randoCheckId)
             return true;
         case RI_DOUBLE_MAGIC:
             return !gSaveContext.save.saveInfo.playerData.isDoubleMagicAcquired;
+        case RI_QUIVER_INF:
+            return CUR_UPG_VALUE(UPG_QUIVER) >= 1 && !Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_QUIVER);
+        case RI_BOMB_BAG_INF:
+            return CUR_UPG_VALUE(UPG_BOMB_BAG) >= 1 && !Flags_GetRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG);
         case RI_SINGLE_MAGIC:
             return !gSaveContext.save.saveInfo.playerData.isMagicAcquired;
         case RI_MAGIC_JAR_SMALL:
@@ -741,6 +754,9 @@ RandoItemId Rando::ConvertItem(RandoItemId randoItemId, RandoCheckId randoCheckI
             case RI_PROGRESSIVE_BOMB_BAG:
                 if (CUR_UPG_VALUE(UPG_BOMB_BAG) == 0) {
                     return RI_BOMB_BAG_20;
+                } else if (InfiniteUpgradesMode() == RO_INF_UPGRADES_CONDENSED_PROGRESSIVE ||
+                           (InfiniteUpgradesMode() == RO_INF_UPGRADES_PROGRESSIVE && CUR_UPG_VALUE(UPG_BOMB_BAG) >= 3)) {
+                    return RI_BOMB_BAG_INF;
                 } else if (CUR_UPG_VALUE(UPG_BOMB_BAG) == 1) {
                     return RI_BOMB_BAG_30;
                 } else if (CUR_UPG_VALUE(UPG_BOMB_BAG) == 2) {
@@ -752,6 +768,9 @@ RandoItemId Rando::ConvertItem(RandoItemId randoItemId, RandoCheckId randoCheckI
             case RI_PROGRESSIVE_BOW:
                 if (CUR_UPG_VALUE(UPG_QUIVER) == 0) {
                     return RI_BOW;
+                } else if (InfiniteUpgradesMode() == RO_INF_UPGRADES_CONDENSED_PROGRESSIVE ||
+                           (InfiniteUpgradesMode() == RO_INF_UPGRADES_PROGRESSIVE && CUR_UPG_VALUE(UPG_QUIVER) >= 3)) {
+                    return RI_QUIVER_INF;
                 } else if (CUR_UPG_VALUE(UPG_QUIVER) == 1) {
                     return RI_QUIVER_40;
                 } else if (CUR_UPG_VALUE(UPG_QUIVER) == 2) {

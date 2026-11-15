@@ -66,12 +66,20 @@ inline void to_json(json& j, const RandoSaveInfo& rando) {
 #endif
 }
 
+// Load a fixed-size array from a save that may predate the array growing (a new RandoOptionId or
+// RandoInf word): copy what the save has, zero the rest. Plain get_to throws on a short array.
+template <typename T, size_t N> inline void GetToArrayTolerant(const json& j, T (&arr)[N]) {
+    for (size_t i = 0; i < N; i++) {
+        arr[i] = (j.is_array() && i < j.size()) ? j.at(i).get<T>() : T{};
+    }
+}
+
 inline void from_json(const json& j, RandoSaveInfo& rando) {
-    j.at("randoInf").get_to(rando.randoInf);
+    GetToArrayTolerant(j.at("randoInf"), rando.randoInf);
     j.at("randoEvents").get_to(rando.randoEvents);
     j.at("randoSaveChecks").get_to(rando.randoSaveChecks);
     j.at("finalSeed").get_to(rando.finalSeed);
-    j.at("randoSaveOptions").get_to(rando.randoSaveOptions);
+    GetToArrayTolerant(j.at("randoSaveOptions"), rando.randoSaveOptions);
     j.at("randoStartingItems").get_to(rando.randoStartingItems);
     j.at("foundDungeonKeys").get_to(rando.foundDungeonKeys);
     j.at("foundTriforcePieces").get_to(rando.foundTriforcePieces);

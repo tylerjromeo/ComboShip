@@ -88,6 +88,7 @@ std::map<RandoOptionId, RandoStaticOption> Options = {
     RO(RO_TRAP_AMOUNT,                 5),
     RO(RO_TRIFORCE_PIECES_MAX,         DEFAULT_TRIFORCE_PIECES_MAX),
     RO(RO_TRIFORCE_PIECES_REQUIRED,    DEFAULT_TRIFORCE_PIECES_MAX),
+    RO(RO_INFINITE_UPGRADES,           RO_INF_UPGRADES_OFF),
 };
 // clang-format on
 

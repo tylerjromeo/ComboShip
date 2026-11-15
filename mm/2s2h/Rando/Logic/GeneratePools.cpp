@@ -307,6 +307,13 @@ void GeneratePools(RandoSaveInfo& saveInfo, std::vector<RandoCheckId>& checkPool
         itemPool.push_back(RI_PROGRESSIVE_WALLET);
     }
 
+    // Infinite Upgrades (bow and bomb bag only): Progressive adds one extra copy that resolves to the
+    // infinite tier (ConvertItem). Condensed folds infinity into the second copy, so it adds nothing.
+    if (saveInfo.randoSaveOptions[RO_INFINITE_UPGRADES] == RO_INF_UPGRADES_PROGRESSIVE) {
+        itemPool.push_back(RI_PROGRESSIVE_BOW);
+        itemPool.push_back(RI_PROGRESSIVE_BOMB_BAG);
+    }
+
     // Shuffle Triforce Pieces into the Pool
     if (saveInfo.randoSaveOptions[RO_SHUFFLE_TRIFORCE_PIECES] == RO_GENERIC_YES) {
         int piecesToShuffle = saveInfo.randoSaveOptions[RO_TRIFORCE_PIECES_MAX];

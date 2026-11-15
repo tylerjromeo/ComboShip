@@ -282,6 +282,9 @@ std::map<RandoItemId, RandoStaticItem> Items = {
     // mailbox. The spoilerName ("RI_COMBO_FOREIGN", via the #id macro) is what the combo generator
     // writes into the MM placement payload (GetItemIdFromName -> RI_COMBO_FOREIGN).
     RI(RI_COMBO_FOREIGN,              "",     "Combo Foreign Item",         RITYPE_JUNK,            ITEM_NONE,                       GI_RUPEE_BLUE,               GID_RUPEE_BLUE),
+    // Infinite Upgrades (RO_INFINITE_UPGRADES): progressive items resolve to these.
+    RI(RI_QUIVER_INF,                 "the",  "Infinite Quiver",            RITYPE_LESSER,          ITEM_NONE,                       GI_NONE,                     GID_QUIVER_50),
+    RI(RI_BOMB_BAG_INF,               "the",  "Infinite Bomb Bag",          RITYPE_LESSER,          ITEM_NONE,                       GI_NONE,                     GID_BOMB_BAG_40),
 };
 
 std::map<StartingItemCategory, std::vector<RandoItemId>> StartingItemsMap = {
@@ -420,6 +423,10 @@ u8 GetIconForZMessage(RandoItemId randoItemId) {
             return GI_MAGIC_JAR_SMALL;
         case RI_DOUBLE_MAGIC:
             return GI_MAGIC_JAR_BIG;
+        case RI_QUIVER_INF:
+            return GI_QUIVER_50;
+        case RI_BOMB_BAG_INF:
+            return GI_BOMB_BAG_40;
         case RI_GREAT_SPIN_ATTACK:
             return GI_SWORD_KOKIRI;
         default:
@@ -446,6 +453,10 @@ const char* GetIconTexturePath(RandoItemId randoItemId) {
             return (const char*)gItemIcons[ITEM_MAGIC_JAR_SMALL];
         case RI_DOUBLE_MAGIC:
             return (const char*)gItemIcons[ITEM_MAGIC_JAR_BIG];
+        case RI_QUIVER_INF:
+            return (const char*)gItemIcons[ITEM_QUIVER_50];
+        case RI_BOMB_BAG_INF:
+            return (const char*)gItemIcons[ITEM_BOMB_BAG_40];
         case RI_GREAT_SPIN_ATTACK:
             return (const char*)gItemIcons[ITEM_SWORD_KOKIRI];
         case RI_CLOCK_TOWN_STRAY_FAIRY:

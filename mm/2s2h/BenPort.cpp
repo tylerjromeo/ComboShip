@@ -3667,6 +3667,14 @@ static void GiveItemForOracle(RandoItemId ri) {
             Inventory_ChangeUpgrade(UPG_WALLET, 3);
             break;
 
+        // Infinite Upgrades — no logic weight, but the flag keeps ConvertItem's chain in step
+        case RI_QUIVER_INF:
+            Flags_SetRandoInf(RANDO_INF_HAS_INFINITE_QUIVER);
+            break;
+        case RI_BOMB_BAG_INF:
+            Flags_SetRandoInf(RANDO_INF_HAS_INFINITE_BOMB_BAG);
+            break;
+
         // Heart pieces/containers — logic doesn't check these for reachability, but include for completeness
         case RI_HEART_CONTAINER:
             gSaveContext.save.saveInfo.playerData.healthCapacity += 0x10;
