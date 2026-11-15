@@ -1970,8 +1970,35 @@ void LoadSettings() {
         case RO_GANON_BOSS_KEY_TOKENS:
             Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_TOKENS);
             break;
+        case RO_GANON_BOSS_KEY_TRIFORCE_PIECES:
+            Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_TRIFORCE_PIECES);
+            break;
         default:
             Rando::Context::GetInstance()->GBKCondition(RO_CHECK_TRIGGER_NONE);
+            break;
+    }
+
+    switch (OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_GANONS_SOUL)) {
+        case RO_GANONS_SOUL_STONES:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_STONES);
+            break;
+        case RO_GANONS_SOUL_MEDALLIONS:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_MEDALLIONS);
+            break;
+        case RO_GANONS_SOUL_REWARDS:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_REWARDS);
+            break;
+        case RO_GANONS_SOUL_DUNGEONS:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_DUNGEONS);
+            break;
+        case RO_GANONS_SOUL_TOKENS:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_TOKENS);
+            break;
+        case RO_GANONS_SOUL_TRIFORCE_PIECES:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_TRIFORCE_PIECES);
+            break;
+        default:
+            Rando::Context::GetInstance()->GanonsSoulCondition(RO_CHECK_TRIGGER_NONE);
             break;
     }
 }
@@ -1990,6 +2017,11 @@ bool IsCheckShuffled(RandomizerCheck rc) {
                  OTRGlobals::Instance->gRandomizer->IdentifyShopItem(loc->GetScene(), loc->GetActorParams() + 1)
                          .enGirlAShopItem == 50)) &&
                (rc != RC_WINCON) && (rc != RC_GANON) &&
+               // Trigger-only checks: they exist only when their setting is a Trigger mode
+               (rc != RC_GANONS_BOSS_KEY ||
+                Rando::Context::GetInstance()->GBKCondition() != RO_CHECK_TRIGGER_NONE) &&
+               (rc != RC_GANON_SOUL ||
+                Rando::Context::GetInstance()->GanonsSoulCondition() != RO_CHECK_TRIGGER_NONE) &&
                (loc->GetRCType() != RCTYPE_SCRUB || showScrubs ||
                 (showMajorScrubs && (rc == RC_LW_DEKU_SCRUB_NEAR_BRIDGE || // The 3 scrubs that are always randomized
                                      rc == RC_HF_DEKU_SCRUB_GROTTO || rc == RC_LW_DEKU_SCRUB_GROTTO_FRONT))) &&
