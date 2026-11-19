@@ -3716,7 +3716,8 @@ s32 func_80128640(PlayState* play, Player* player, Gfx* dlist) {
             mask = player->currentMask;
         }
 
-        if (func_80127438(play, player, mask)) {
+        if (func_80127438(play, player, mask) &&
+            !(mask == PLAYER_MASK_BUNNY && CVarGetInteger("gEnhancements.HideBunnyHood", 0))) {
             OPEN_DISPS(play->state.gfxCtx);
 
             Matrix_Push();
@@ -4050,7 +4051,10 @@ void Player_PostLimbDrawGameplay(PlayState* play, s32 limbIndex, Gfx** dList1, G
              ((((player->transformation != PLAYER_FORM_HUMAN) && (player->currentMask >= PLAYER_MASK_FIERCE_DEITY)) &&
                ((player->transformation + PLAYER_MASK_FIERCE_DEITY) != player->currentMask)) &&
               (player->skelAnime.curFrame >= 10.0f)))) {
-            if (func_80127438(play, player, player->currentMask)) {
+            // 2S2H [Enhancement] Invisible Bunny Hood (shares the SoH CVar in ComboShip)
+            if (func_80127438(play, player, player->currentMask) &&
+                !(player->currentMask == PLAYER_MASK_BUNNY &&
+                  CVarGetInteger("gEnhancements.HideBunnyHood", 0))) {
                 s32 maskMinusOne = player->currentMask - 1;
 
                 OPEN_DISPS(play->state.gfxCtx);

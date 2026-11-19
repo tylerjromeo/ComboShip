@@ -1552,6 +1552,9 @@ void BenMenu::AddEnhancements() {
         .CVar("gEnhancements.Masks.PersistentBunnyHood.Enabled")
         .Options(CheckboxOptions().Tooltip(
             "Permanently toggle a speed boost from the bunny hood by pressing 'A' on it in the mask menu."));
+    AddWidget(path, "Invisible Bunny Hood", WIDGET_CVAR_CHECKBOX)
+        .CVar("gEnhancements.HideBunnyHood")
+        .Options(CheckboxOptions().Tooltip("Turns Bunny Hood Invisible while still maintaining its effects."));
     AddWidget(path, "Blast Mask Cooldown", WIDGET_CVAR_SLIDER_FLOAT)
         .CVar("gEnhancements.Masks.BlastMaskCooldown")
         .Options(FloatSliderOptions()
