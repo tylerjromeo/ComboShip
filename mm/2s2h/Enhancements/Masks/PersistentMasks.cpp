@@ -51,6 +51,10 @@ static void UpdatePersistentMasksState() {
             if (!gSaveContext.save.shipSaveInfo.persistentBunnyHood) {
                 return;
             }
+            // Invisible Bunny Hood: keep the effect, skip the model.
+            if (CVarGetInteger("gEnhancements.HideBunnyHood", 0)) {
+                return;
+            }
 
             // This emulates the vanilla check for if the masks should be drawn, specifically around
             // z_player.c 12923 (Player_Draw)
