@@ -1,6 +1,9 @@
 #include "ship/window/gui/SecondaryScreen.h"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
 #include <cfloat>
 #include <cmath>
 #include <mutex>
@@ -109,6 +112,45 @@ ImVec2 GetUiScreenSize() {
 
 ImVec2 GetUiScreenCenter() {
     return sFrameActive ? GetSecondaryCenter() : GetPrimaryCenter();
+}
+
+namespace {
+// Right-stick scrolling. The controller read (game thread) and the ImGui frame (render thread) talk
+// through these.
+std::atomic<bool> sStickFocused{ false };        // render -> game: a secondary window has the stick
+std::atomic<bool> sStickReleaseRequest{ false }; // game -> render: other game input, drop the focus
+std::atomic<int> sStickX{ 0 };                   // game -> render: the taken right stick
+std::atomic<int> sStickY{ 0 };
+std::atomic<int64_t> sStickTimeMs{ 0 }; // when sStickX/Y were written (stale = the game isn't reading)
+
+int64_t NowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+} // namespace
+
+bool TakeRightStick(uint32_t buttons, int8_t leftX, int8_t leftY, int8_t* rightX, int8_t* rightY) {
+    static uint32_t sPrevButtons = 0;
+    const uint32_t newlyPressed = buttons & ~sPrevButtons;
+    sPrevButtons = buttons;
+    if (!sStickFocused.load(std::memory_order_relaxed) || rightX == nullptr || rightY == nullptr) {
+        return false;
+    }
+    if (newlyPressed != 0 || std::abs(leftX) > 20 || std::abs(leftY) > 20) {
+        // Playing again: give the stick back to the camera.
+        sStickFocused.store(false, std::memory_order_relaxed);
+        sStickReleaseRequest.store(true, std::memory_order_relaxed);
+        sStickX.store(0, std::memory_order_relaxed);
+        sStickY.store(0, std::memory_order_relaxed);
+        return false;
+    }
+    sStickX.store(*rightX, std::memory_order_relaxed);
+    sStickY.store(*rightY, std::memory_order_relaxed);
+    sStickTimeMs.store(NowMs(), std::memory_order_relaxed);
+    *rightX = 0;
+    *rightY = 0;
+    return true;
 }
 
 #ifdef COMBO_BUILD
@@ -619,10 +661,131 @@ void DrawStatusBar() {
 }
 } // namespace
 
+namespace {
+bool StickScrollEnabled() {
+    auto ctx = Ship::Context::GetRawInstance();
+    if (ctx == nullptr || ctx->GetConsoleVariables() == nullptr) {
+        return true;
+    }
+    return ctx->GetConsoleVariables()->GetInteger(CVAR_SECONDARY_SCREEN_STICK_SCROLL, 1) != 0;
+}
+
+bool CanScroll(ImGuiWindow* w) {
+    return (w->ScrollMax.y > 0.0f || w->ScrollMax.x > 0.0f) && !(w->Flags & ImGuiWindowFlags_NoScrollWithMouse);
+}
+
+// Last frame's state (this runs right after NewFrame, before any window's Begin).
+bool ShownLastFrame(ImGuiWindow* w) {
+    return w != nullptr && w->WasActive && !w->Hidden && w->RootWindow != nullptr && !w->RootWindow->Hidden;
+}
+
+// The window the right stick should scroll after a tap: the innermost scrollable window under the finger,
+// else the biggest scrollable window inside the tapped one (taps on a tab header or a filter row).
+ImGuiWindow* FindStickTarget(ImGuiWindow* hovered) {
+    for (ImGuiWindow* w = hovered; w != nullptr; w = w->ParentWindow) {
+        if (CanScroll(w)) {
+            return w;
+        }
+    }
+    if (hovered == nullptr || hovered->RootWindow == nullptr ||
+        (hovered->RootWindow->Flags & ImGuiWindowFlags_NoNavFocus)) {
+        return nullptr; // nothing tapped, or a host window (the tracker dock) rather than a tracker
+    }
+    ImGuiWindow* best = nullptr;
+    float bestArea = 0.0f;
+    for (ImGuiWindow* w : GImGui->Windows) {
+        if (w->RootWindow != hovered->RootWindow || !CanScroll(w) || !ShownLastFrame(w)) {
+            continue;
+        }
+        const float area = w->InnerRect.GetWidth() * w->InnerRect.GetHeight();
+        if (area > bestArea) {
+            best = w;
+            bestArea = area;
+        }
+    }
+    return best;
+}
+
+void UpdateStickScroll() {
+    static ImGuiID sTargetId = 0;
+    static ImVec2 sRemainder = ImVec2(0.0f, 0.0f); // sub-pixel scroll carried over (ImGui rounds Scroll)
+
+    ImGuiContext& g = *GImGui;
+    ImGuiIO& io = g.IO;
+    auto drop = [&]() {
+        sTargetId = 0;
+        sRemainder = ImVec2(0.0f, 0.0f);
+        sStickFocused.store(false, std::memory_order_relaxed);
+    };
+
+    if (!sFrameActive || !StickScrollEnabled()) {
+        drop();
+        return;
+    }
+    if (sStickReleaseRequest.exchange(false, std::memory_order_relaxed)) {
+        drop();
+    }
+    if (io.MouseClicked[0]) {
+        drop();
+        if (sState.touchDown && ContainsPoint(io.MousePos)) {
+            if (ImGuiWindow* target = FindStickTarget(g.HoveredWindow)) {
+                sTargetId = target->ID;
+                sStickFocused.store(true, std::memory_order_relaxed);
+            }
+        }
+    }
+    if (sTargetId == 0) {
+        return;
+    }
+    ImGuiWindow* target = ImGui::FindWindowByID(sTargetId);
+    if (!ShownLastFrame(target)) {
+        drop(); // closed, or its tab was switched away
+        return;
+    }
+
+    // Outline the focused window so it's clear the stick is scrolling it rather than the camera.
+    ImVec4 col = g.Style.Colors[ImGuiCol_NavCursor];
+    col.w *= 0.8f;
+    ImGui::GetForegroundDrawList()->AddRect(target->InnerRect.Min, target->InnerRect.Max,
+                                            ImGui::ColorConvertFloat4ToU32(col), 0.0f, 0, 2.0f);
+
+    if (NowMs() - sStickTimeMs.load(std::memory_order_relaxed) > 150) {
+        return; // the game isn't reading the pad (loading, paused emulation): don't keep scrolling
+    }
+    auto axis = [](int raw) {
+        float v = std::clamp(raw / 85.0f, -1.0f, 1.0f); // N64 stick range
+        if (std::fabs(v) < 0.12f) {
+            return 0.0f;
+        }
+        return v * std::fabs(v); // gentle near the centre, fast at full tilt
+    };
+    const float vx = axis(sStickX.load(std::memory_order_relaxed));
+    const float vy = axis(sStickY.load(std::memory_order_relaxed));
+    if (vx == 0.0f && vy == 0.0f) {
+        sRemainder = ImVec2(0.0f, 0.0f);
+        return;
+    }
+    const float speed = g.FontSize * 40.0f * io.DeltaTime; // about 40 lines a second at full tilt
+    sRemainder.x += vx * speed;
+    sRemainder.y -= vy * speed; // stick up = towards the top of the list
+    const float stepX = std::trunc(sRemainder.x);
+    const float stepY = std::trunc(sRemainder.y);
+    sRemainder.x -= stepX;
+    sRemainder.y -= stepY;
+    if (stepY != 0.0f && target->ScrollMax.y > 0.0f) {
+        ImGui::SetScrollY(target, target->Scroll.y + stepY);
+    }
+    if (stepX != 0.0f && target->ScrollMax.x > 0.0f) {
+        ImGui::SetScrollX(target, target->Scroll.x + stepX);
+    }
+}
+} // namespace
+
 void AfterNewFrame() {
     if (sFrameActive) {
         DrawStatusBar();
     }
+    UpdateStickScroll();
 
     static bool sTracking = false;
     static bool sScrolling = false;

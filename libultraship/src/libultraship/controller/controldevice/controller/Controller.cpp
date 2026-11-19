@@ -10,6 +10,7 @@
 #endif
 #include <spdlog/spdlog.h>
 #include "ship/utils/StringHelper.h"
+#include "ship/window/gui/SecondaryScreen.h"
 
 #define M_TAU 6.2831853071795864769252867665590057 // 2 * pi
 #define MINIMUM_RADIUS_TO_MAP_NOTCH 0.9
@@ -43,6 +44,12 @@ void Controller::ReadToOSContPad(OSContPad* pad) {
     // Stick Inputs
     GetLeftStick()->UpdatePad(padToBuffer.stick_x, padToBuffer.stick_y);
     GetRightStick()->UpdatePad(padToBuffer.right_stick_x, padToBuffer.right_stick_y);
+
+    // A tapped tracker on the secondary display borrows the right stick for scrolling.
+    if (GetPortIndex() == 0) {
+        Ship::SecondaryScreen::TakeRightStick(padToBuffer.button, padToBuffer.stick_x, padToBuffer.stick_y,
+                                              &padToBuffer.right_stick_x, &padToBuffer.right_stick_y);
+    }
 
     // Gyro
     GetGyro()->UpdatePad(padToBuffer.gyro_x, padToBuffer.gyro_y);

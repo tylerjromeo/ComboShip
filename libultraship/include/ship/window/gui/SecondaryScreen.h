@@ -19,6 +19,7 @@
 // When no secondary display is attached (or the feature is disabled) everything here is a no-op and the canvas is
 // just the primary display, so single-screen devices behave exactly as before.
 
+#include <cstdint>
 #include <imgui.h>
 
 namespace Ship {
@@ -44,6 +45,9 @@ ImVec2 GetSecondaryCenter();
 // placed on the secondary display should go. Equals GetSecondaryPos/Size when the strip is off.
 #define CVAR_SECONDARY_SCREEN_STATUS_BAR "gSettings.SecondaryScreen.StatusBar"   // default 1
 #define CVAR_SECONDARY_SCREEN_CLOCK_24H "gSettings.SecondaryScreen.Clock24h"     // default 0
+// Right stick scrolls the secondary-display window last tapped (instead of moving the camera) until the
+// game gets other input. Default 1.
+#define CVAR_SECONDARY_SCREEN_STICK_SCROLL "gSettings.SecondaryScreen.RightStickScroll"
 ImVec2 GetSecondaryWorkPos();
 ImVec2 GetSecondaryWorkSize();
 
@@ -83,6 +87,12 @@ void PlaceOnPrimary(const char* windowName);
 #endif
 
 // --- Integration points (called by the GUI backend, not by game code) ---
+
+// Called by the controller read (game thread) for port 1 with this read's buttons and sticks. While a
+// window on the secondary display has right-stick focus (it was tapped and the game has had no other
+// input since), takes the right stick for scrolling it: zeroes *rightX/*rightY and returns true. A newly
+// pressed button or a left-stick move ends the focus and the stick goes back to the game.
+bool TakeRightStick(uint32_t buttons, int8_t leftX, int8_t leftY, int8_t* rightX, int8_t* rightY);
 
 // Call right after the platform backend's NewFrame (which sets io.DisplaySize to the primary window size) and before
 // ImGui::NewFrame(). Widens io.DisplaySize and injects queued secondary-display touch events.
