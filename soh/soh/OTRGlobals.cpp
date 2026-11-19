@@ -4728,6 +4728,23 @@ static bool Combo_IsUsedHintTemplate(const std::string& name) {
 // distributor decides which are hintable for its combined world) — trimming that further to a
 // placed-set filter hit a reproducible crash during headless verification and was backed out; only
 // hintTextTable (below) is trimmed for now. See docs/UPSTREAM_MERGES.md cross-hints entry.
+// ComboShip: RandomizerCheck id -> spoiler name + tracker area, for external tools (the AI hint skill)
+// that read the trackerData checkStatus array (keyed by the numeric enum) out of a .combosav.
+extern "C" COMBO_EXPORT const char* SOH_DumpCheckIndex(void) {
+    static std::string cached;
+    nlohmann::json out = nlohmann::json::array();
+    for (int i = 0; i < RC_MAX; ++i) {
+        Rando::Location* loc = Rando::StaticData::GetLocation(static_cast<RandomizerCheck>(i));
+        if (!loc || loc->GetName().empty())
+            continue;
+        out.push_back({ { "rc", i },
+                        { "name", loc->GetName() },
+                        { "area", RandomizerCheckObjects::GetRCAreaName(loc->GetArea()) } });
+    }
+    cached = out.dump();
+    return cached.c_str();
+}
+
 extern "C" COMBO_EXPORT const char* SOH_DumpRandoHintData(void) {
     static std::string cached;
     nlohmann::json out = nlohmann::json::object();

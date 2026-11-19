@@ -35,6 +35,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -118,6 +120,10 @@ static int Run(int argc, char** argv) {
     int count = 1;
     std::string playthroughFile;
     std::string settingsFile; // consolidated spoiler to restore settings/tricks from (exact-seed repro)
+    std::string checkIndexFile; // --dump-check-index: write numeric check id -> name maps and exit
+    // --reachable <state.json> --out <file>: {spoiler, collected:{oot:[],mm:[]}} -> what the player can
+    // reach right now with only the items they have found (the AI hint skill's "where next" oracle).
+    std::string reachableFile, outFile;
     bool haveMasterSeed = false;
     uint32_t masterSeedArg = 0;
     // #136: combined goal. Absent => read the menu CVars (matches in-game); 0 => force bosses.
@@ -151,6 +157,12 @@ static int Run(int argc, char** argv) {
             playthroughFile = argv[++i];
         else if (a == "--settings" && i + 1 < argc)
             settingsFile = argv[++i];
+        else if (a == "--dump-check-index" && i + 1 < argc)
+            checkIndexFile = argv[++i];
+        else if (a == "--reachable" && i + 1 < argc)
+            reachableFile = argv[++i];
+        else if (a == "--out" && i + 1 < argc)
+            outFile = argv[++i];
         else if (a == "--master-seed" && i + 1 < argc) {
             masterSeedArg = static_cast<uint32_t>(std::strtoul(argv[++i], nullptr, 10));
             haveMasterSeed = true;
@@ -229,17 +241,42 @@ static int Run(int argc, char** argv) {
     SOH_InitRandoHeadless();
     MM_InitRandoHeadless();
 
+    // ---- Check-index mode: numeric check id -> spoiler name, for tools reading .combosav saves. ----
+    if (!checkIndexFile.empty()) {
+        auto SOH_DumpCheckIndex = Sym<FnDump>(soh, "SOH_DumpCheckIndex");
+        auto MM_DumpCheckIndex = Sym<FnDump>(mm, "MM_DumpCheckIndex");
+        if (!SOH_DumpCheckIndex || !MM_DumpCheckIndex) {
+            std::cerr << "[comborando] check-index exports unavailable — rebuild soh / 2ship\n";
+            return 2;
+        }
+        nlohmann::json out = { { "oot", nlohmann::json::parse(SOH_DumpCheckIndex()) },
+                               { "mm", nlohmann::json::parse(MM_DumpCheckIndex()) } };
+        std::ofstream f(checkIndexFile, std::ios::trunc);
+        f << out.dump(1);
+        std::cout << "[comborando] check index (" << out["oot"].size() << " OOT, " << out["mm"].size()
+                  << " MM) -> " << checkIndexFile << "\n";
+        return 0;
+    }
+
     // ---- Playthrough mode: replay a finished seed and judge beatability. ----
-    if (!playthroughFile.empty()) {
+    if (!playthroughFile.empty() || !reachableFile.empty()) {
+        const bool reachableMode = !reachableFile.empty();
         if (!SOH_RestoreSettings || !SOH_PrepContext || !MM_RestoreSettings) {
             std::cerr << "[playthrough] settings-restore exports unavailable — rebuild soh.dll / 2ship.dll\n";
             return 2;
         }
-        nlohmann::json spoiler;
+        nlohmann::json spoiler, collectedState;
         try {
-            spoiler = nlohmann::json::parse(ReadFile(playthroughFile));
+            if (reachableMode) {
+                auto state = nlohmann::json::parse(ReadFile(reachableFile));
+                spoiler = state.at("spoiler");
+                collectedState = state.value("collected", nlohmann::json::object());
+            } else {
+                spoiler = nlohmann::json::parse(ReadFile(playthroughFile));
+            }
         } catch (const std::exception& e) {
-            std::cerr << "[playthrough] could not read/parse '" << playthroughFile << "': " << e.what() << "\n";
+            std::cerr << "[playthrough] could not read/parse '" << (reachableMode ? reachableFile : playthroughFile)
+                      << "': " << e.what() << "\n";
             return 2;
         }
         auto ootSettings = spoiler.value("oot", nlohmann::json::object()).value("settings", nlohmann::json::object());
@@ -252,6 +289,37 @@ static int Run(int argc, char** argv) {
         // Shared Items: MM copies OOT starts with.
         if (spoiler.contains("sharedStartingMm"))
             flat["sharedStartingMm"] = spoiler["sharedStartingMm"];
+        // Reachable mode: every shuffled check the player has NOT found holds a dud name the oracles
+        // ignore, so the walk only ever owns found items; the checks it walks onto are the reachable set.
+        std::vector<std::string> startOwned[2]; // reachable mode: found items, granted up front
+        if (reachableMode) {
+            std::set<std::string> found[2];
+            for (int g = 0; g < 2; ++g)
+                for (const auto& n : collectedState.value(g ? "mm" : "oot", nlohmann::json::array()))
+                    found[g].insert(n.get<std::string>());
+            // Found items are granted at the start (a pickup made out of logic, or one the walk can't
+            // re-derive, still counts); every placed check then holds a dud name the oracles ignore, so
+            // the checks the walk steps onto are exactly what is reachable now.
+            std::map<std::pair<int, std::string>, const nlohmann::json*> foreignAt;
+            for (const auto& f : flat["foreign"])
+                foreignAt[{ f.value("checkGame", "") == "mm" ? 1 : 0, f.value("checkName", "") }] = &f;
+            for (int g = 0; g < 2; ++g)
+                for (auto it = flat[g ? "mm" : "oot"].begin(); it != flat[g ? "mm" : "oot"].end(); ++it) {
+                    if (found[g].count(it.key())) {
+                        auto fi = foreignAt.find({ g, it.key() });
+                        if (fi != foreignAt.end()) {
+                            int ig = fi->second->value("itemGame", "") == "mm" ? 1 : 0;
+                            startOwned[ig].push_back(fi->second->value("itemName", ""));
+                        } else if (it.value().is_string()) {
+                            startOwned[g].push_back(ComboRando::StripGameSuffix(it.value().get<std::string>()));
+                        } else if (it.value().is_object()) {
+                            startOwned[g].push_back(ComboRando::StripGameSuffix(it.value().value("item", "")));
+                        }
+                    }
+                    it.value() = "__COMBO_UNFOUND__";
+                }
+            flat["foreign"] = nlohmann::json::array();
+        }
         std::string label = SeedLabel(spoiler);
         uint32_t masterSeed = spoiler.value("masterSeed", 0u);
         // #136: the seed's own goal drives both the traversal win test and the pool shaping below.
@@ -359,7 +427,9 @@ static int Run(int argc, char** argv) {
             mergeFixed(mmDump, "mm");
             return ComboRando::RunPlaythrough(passFlat.dump(), oot, mmO, label, MM_Restore, ptOut, sohDump, mmDump,
                                               ComboRando::OotAccessFromDump(sohDump) != ComboRando::OotAccess::NO_LOGIC,
-                                              /*progressionOnly*/ false, goal, mmStart, sharedMask);
+                                              /*progressionOnly*/ false, goal, mmStart, sharedMask,
+                                              reachableMode ? &startOwned[0] : nullptr,
+                                              reachableMode ? &startOwned[1] : nullptr);
         };
 
         // Affordability canary: re-check every priced purchase in the walk against the wallets held
@@ -436,6 +506,24 @@ static int Run(int argc, char** argv) {
             if ((it.key().find("NoLogic") != std::string::npos || it.key().find("LogicRules") != std::string::npos) &&
                 it.value().is_number() && it.value().get<int>() == 1)
                 ootNoLogic = true;
+
+        if (reachableMode) {
+            nlohmann::json pt = nlohmann::json::array();
+            runPass(false, &pt);
+            if (entranceRestoreFailed) {
+                std::cerr << "[reachable] could not restore the seed's entrance layout\n";
+                return 2;
+            }
+            nlohmann::json out = { { "oot", nlohmann::json::array() }, { "mm", nlohmann::json::array() } };
+            for (const auto& sph : pt)
+                for (const auto& st : sph.value("steps", nlohmann::json::array()))
+                    out[st.value("game", "oot")].push_back(st.value("check", ""));
+            std::ofstream f(outFile.empty() ? std::string("reachable.json") : outFile, std::ios::trunc);
+            f << nlohmann::json{ { "reachable", out } }.dump();
+            std::cout << "[reachable] " << out["oot"].size() << " OOT + " << out["mm"].size()
+                      << " MM checks reachable\n";
+            return 0;
+        }
 
         // Pass 1 — the seed's own settings + enabled tricks: "can this player beat it?"
         std::cout << "[playthrough] seed '" << label << "' — Pass 1 (" << ootEnabledTricks.size()

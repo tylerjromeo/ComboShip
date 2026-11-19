@@ -452,7 +452,8 @@ inline PlaythroughResult RunPlaythrough(const std::string& spoilerJson, const Or
                                         nlohmann::json* playthroughOut = nullptr, const std::string& sohDumpJson = "",
                                         const std::string& mmDumpJson = "", bool portalGated = true,
                                         bool progressionOnly = false, CwGoal goal = {}, bool mmStart = false,
-                                        uint32_t sharedMask = 0) {
+                                        uint32_t sharedMask = 0, const std::vector<std::string>* startOot = nullptr,
+                                        const std::vector<std::string>* startMm = nullptr) {
     static const char* kOotGanon = "Ganon";           // RC_GANON reachable = OOT beatable (see CrossWorldRando.h)
     static const char* kMmWin = "Moon Majora Pot 01"; // ComboShip: friendly form of RC_MOON_MAJORA_POT_01
 
@@ -466,6 +467,11 @@ inline PlaythroughResult RunPlaythrough(const std::string& spoilerJson, const Or
     auto queryReachable = QueryReachable;
 
     std::vector<std::string> ownedOot, ownedMm = SharedStartingMmFromSpoiler(spoilerJson);
+    // Optional pre-owned items (the hint skill's "what can I reach with what I actually found" query).
+    if (startOot)
+        ownedOot.insert(ownedOot.end(), startOot->begin(), startOot->end());
+    if (startMm)
+        ownedMm.insert(ownedMm.end(), startMm->begin(), startMm->end());
     std::unordered_set<std::string> collected; // "<cg>:<cn>"
     std::ostringstream log;
     log << "Cross-world playthrough - seed '" << seedLabel << "'\n";
