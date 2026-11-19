@@ -172,7 +172,16 @@ RandoCheckId GetRandomCheck(bool repeatableOnlyObtained = false, std::string* ou
     if (repeatableOnlyObtained) {
         Ship_Random_Seed(gGameState->frames);
     } else {
-        uint32_t seed = gPlayState->sceneId + enGs->actor.home.pos.x + enGs->actor.home.pos.z;
+        // Convert through a signed 64-bit int: a negative float -> uint32_t is UB, and arm64 (fcvtzu)
+        // clamps it to 0, so every stone with a negative coordinate sum shared one hint. Going through
+        // int64_t matches what x86 already did, so desktop seeds keep their hints.
+        float posSum = gPlayState->sceneId + enGs->actor.home.pos.x + enGs->actor.home.pos.z;
+        uint32_t seed = (uint32_t)(int64_t)posSum;
+        // Generic grottos all reuse one room of SCENE_KAKUSIANA with the stone at the same spot; mix
+        // in the grotto ID (the entrance's chest/contents param) so each grotto gets its own hint.
+        if (gPlayState->sceneId == SCENE_KAKUSIANA) {
+            seed += (uint32_t)gSaveContext.respawn[RESPAWN_MODE_UNK_3].data * 0x9E3779B1u;
+        }
         Ship_Random_Seed(gSaveContext.save.shipSaveInfo.rando.finalSeed + seed);
     }
 
