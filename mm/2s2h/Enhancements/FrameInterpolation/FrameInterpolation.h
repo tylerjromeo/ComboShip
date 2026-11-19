@@ -62,6 +62,12 @@ void FrameInterpolation_RecordMatrixRotateAxis(f32 angle, Vec3f* axis, u8 mode);
 
 void FrameInterpolation_RecordSkinMatrixMtxFToMtx(MtxF* src, Mtx* dest);
 
+// Records a skin limb's CPU-posed vertices (vtxBuf is a Vtx array) so interpolated frames can blend them.
+void FrameInterpolation_RecordSkinVertices(const void* key, void* vtxBuf, u32 count);
+
+// Writes the current tick's exact skin vertices back over any blended ones. Call before the tick's final frame.
+void FrameInterpolation_RestoreSkinVertices(void);
+
 #ifdef __cplusplus
 }
 #endif

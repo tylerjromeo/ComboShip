@@ -1,6 +1,7 @@
 #include "prevent_bss_reordering.h"
 #include "global.h"
 #include "z64skin.h"
+#include "2s2h/Enhancements/FrameInterpolation/FrameInterpolation.h"
 
 // 60 is an arbitrary number which specifies the max amount of limbs per skeleton this system supports
 MtxF gSkinLimbMatrices[60];
@@ -123,6 +124,8 @@ void Skin_ApplyLimbModifications(GraphicsContext* gfxCtx, Skin* skin, s32 limbIn
         Skin_UpdateVertices(&gSkinLimbMatrices[limbTransformations[modif->unk_04].limbIndex], skinVertices, modif,
                             vtxBuf, &spDC);
     }
+
+    FrameInterpolation_RecordSkinVertices(vtxEntry, vtxBuf, data->totalVtxCount);
 
     gSPSegment(POLY_OPA_DISP++, 0x08, vtxEntry->buf[vtxEntry->index]);
 

@@ -100,7 +100,8 @@ enum class Op {
     MatrixToMtx,
     MatrixReplaceRotation,
     MatrixRotateAxis,
-    SkinMatrixMtxFToMtx
+    SkinMatrixMtxFToMtx,
+    SkinVertices
 };
 
 typedef pair<const void*, int> label;
@@ -171,6 +172,12 @@ union Data {
         label key;
         size_t idx;
     } open_child;
+
+    struct {
+        const void* key; // the skin limb's SkinLimbVtx entry, stable for the actor's lifetime
+        u32 count;
+        u32 storage; // index into Recording::skin_vtx
+    } skin_vertices;
 };
 
 struct Path {
@@ -179,8 +186,18 @@ struct Path {
     vector<pair<Op, size_t>> items;
 };
 
+// Skin (horse) limbs are posed by writing vertex positions/normals on the CPU (Skin_UpdateVertices), so there
+// is no matrix for the interpolator to blend. Each tick's vertices are copied here, and interpolated frames
+// write blended vertices into the game's buffer in place; the exact tick values are written back before the
+// tick's final frame (FrameInterpolation_RestoreSkinVertices).
+struct SkinVtxRecord {
+    Vtx* dest;
+    vector<Vtx> vtx;
+};
+
 struct Recording {
     Path root_path;
+    vector<SkinVtxRecord> skin_vtx;
 };
 
 bool is_recording;
@@ -189,6 +206,7 @@ uint32_t camera_epoch;
 uint32_t previous_camera_epoch;
 Recording current_recording;
 Recording previous_recording;
+bool skin_vtx_dirty;
 
 bool next_is_actor_pos_rot_matrix;
 bool has_inv_actor_mtx;
@@ -292,9 +310,50 @@ struct InterpolateCtx {
         res->z = interpolate_angle(o->z, n->z);
     }
 
+    static s16 lerp_s16(float w, float step, s16 o, s16 n) {
+        return (s16)lroundf(w * o + step * n);
+    }
+
+    void interpolate_skin_vertices(Path* old_path, Path* new_path, Data& new_op) {
+        if (old_path == new_path) {
+            return; // nothing from the previous tick to blend from
+        }
+        auto it = old_path->ops.find(Op::SkinVertices);
+        if (it == old_path->ops.end()) {
+            return;
+        }
+        const Data* old_op = nullptr;
+        for (const Data& d : it->second) {
+            if (d.skin_vertices.key == new_op.skin_vertices.key && d.skin_vertices.count == new_op.skin_vertices.count) {
+                old_op = &d;
+                break;
+            }
+        }
+        if (old_op == nullptr) {
+            return;
+        }
+        const SkinVtxRecord& o = previous_recording.skin_vtx[old_op->skin_vertices.storage];
+        const SkinVtxRecord& n = current_recording.skin_vtx[new_op.skin_vertices.storage];
+        Vtx* dest = n.dest;
+        for (u32 i = 0; i < new_op.skin_vertices.count; i++) {
+            const Vtx_tn& ov = o.vtx[i].n;
+            const Vtx_tn& nv = n.vtx[i].n;
+            for (int j = 0; j < 3; j++) {
+                dest[i].n.ob[j] = lerp_s16(w, step, ov.ob[j], nv.ob[j]);
+                dest[i].n.n[j] = (signed char)lroundf(w * ov.n[j] + step * nv.n[j]);
+            }
+        }
+        skin_vtx_dirty = true;
+    }
+
     void interpolate_branch(Path* old_path, Path* new_path) {
         for (auto& item : new_path->items) {
             Data& new_op = new_path->ops[item.first][item.second];
+
+            if (item.first == Op::SkinVertices) {
+                interpolate_skin_vertices(old_path, new_path, new_op);
+                continue;
+            }
 
             if (item.first == Op::OpenChild) {
                 if (auto it = old_path->children.find(new_op.open_child.key);
@@ -450,6 +509,7 @@ unordered_map<Mtx*, MtxF> FrameInterpolation_Interpolate(float step) {
 }
 
 void FrameInterpolation_StartRecord(void) {
+    skin_vtx_dirty = false;
     previous_recording = std::move(current_recording);
     current_recording = {};
     current_path.clear();
@@ -600,6 +660,24 @@ void FrameInterpolation_RecordSkinMatrixMtxFToMtx(MtxF* src, Mtx* dest) {
     if (!is_recording)
         return;
     FrameInterpolation_RecordMatrixMtxFToMtx(src, dest);
+}
+
+void FrameInterpolation_RecordSkinVertices(const void* key, void* vtxBuf, u32 count) {
+    if (!is_recording || vtxBuf == nullptr || count == 0)
+        return;
+    auto& store = current_recording.skin_vtx;
+    append(Op::SkinVertices).skin_vertices = { key, count, (u32)store.size() };
+    Vtx* buf = (Vtx*)vtxBuf;
+    store.push_back({ buf, vector<Vtx>(buf, buf + count) });
+}
+
+void FrameInterpolation_RestoreSkinVertices(void) {
+    if (!skin_vtx_dirty)
+        return;
+    for (auto& rec : current_recording.skin_vtx) {
+        std::copy(rec.vtx.begin(), rec.vtx.end(), rec.dest);
+    }
+    skin_vtx_dirty = false;
 }
 
 // https://stackoverflow.com/questions/1148309/inverting-a-4x4-matrix
