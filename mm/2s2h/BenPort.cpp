@@ -1463,9 +1463,6 @@ void RunCommands(Gfx* Commands, int time, int step, int denom, int count) {
         time += step;
         std::unordered_map<Mtx*, MtxF> mtx_replacements =
             (time == denom) ? std::unordered_map<Mtx*, MtxF>() : FrameInterpolation_Interpolate((float)time / denom);
-        if (time == denom) {
-            FrameInterpolation_RestoreSkinVertices();
-        }
         intp->mInterpolationT = (float)time / denom;
         wnd->DrawAndRunGraphicsCommands(Commands, mtx_replacements);
         intp->mInterpolationIndex++;
