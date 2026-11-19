@@ -31,6 +31,15 @@ void Controller::ReadToOSContPad(OSContPad* pad) {
         button->UpdatePad(padToBuffer.button);
     }
 
+    // Optional chord: holding L and C-Right together presses C-Up instead (for layouts where C-Right
+    // sits on a shoulder button next to L and C-Up has no button of its own).
+    if (Ship::Context::GetRawInstance()->GetConsoleVariables()->GetInteger(
+            "gSettings.Controllers.LCRightChordCUp", 0) &&
+        (padToBuffer.button & BTN_L) && (padToBuffer.button & BTN_CRIGHT)) {
+        padToBuffer.button &= ~(BTN_L | BTN_CRIGHT);
+        padToBuffer.button |= BTN_CUP;
+    }
+
     // Stick Inputs
     GetLeftStick()->UpdatePad(padToBuffer.stick_x, padToBuffer.stick_y);
     GetRightStick()->UpdatePad(padToBuffer.right_stick_x, padToBuffer.right_stick_y);
