@@ -30,6 +30,8 @@ constexpr const char* kCvarOnlyPaused = "gCombo.HintTracker.OnlyPaused";
 constexpr const char* kCvarShowUnrevealed = "gCombo.HintTracker.ShowUnrevealed";
 constexpr const char* kCvarShowJunk = "gCombo.HintTracker.ShowJunk";
 constexpr const char* kCvarHideRead = "gCombo.HintTracker.HideRead";
+constexpr const char* kCvarFontScale = "gCombo.HintTracker.FontScale";
+constexpr float kDefaultFontScale = 1.4f; // the base 1.0 text is too small to read comfortably on the Thor
 constexpr int kDefaultWindowType = 1; // 1 = normal window (the hint list is text-heavy)
 
 // Launcher push side. The launcher owns/reuses its buffers and can call from a game DLL's thread,
@@ -356,6 +358,7 @@ std::shared_ptr<ComboHintTrackerWindow> sWindow;
 
 void ComboHintTrackerWindow::DrawElement() {
     PollPush();
+    ImGui::SetWindowFontScale(CVarGetFloat(kCvarFontScale, kDefaultFontScale));
 
     const ImVec4 theme = ComboMenu_ThemeColor();
     const bool showUnrevealed = CVarGetInteger(kCvarShowUnrevealed, 0) != 0;
@@ -539,6 +542,14 @@ void DrawHintTrackerSharedPanel() {
             changed = true;
         }
         ComboMenu_PopCombobox();
+
+        float fontScale = CVarGetFloat(kCvarFontScale, kDefaultFontScale);
+        ComboMenu_PushSlider(theme);
+        if (ImGui::SliderFloat("Font size", &fontScale, 0.8f, 2.5f, "%.1fx")) {
+            CVarSetFloat(kCvarFontScale, fontScale);
+            changed = true;
+        }
+        ComboMenu_PopSlider();
 
         ComboMenu_PushCheckbox(theme);
         bool onlyPaused = CVarGetInteger(kCvarOnlyPaused, 0) != 0;
