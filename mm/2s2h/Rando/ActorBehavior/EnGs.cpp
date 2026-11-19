@@ -8,6 +8,7 @@
 #endif
 
 #include <algorithm>
+#include <unordered_map>
 #include <vector>
 
 extern "C" {
@@ -108,9 +109,10 @@ bool ShouldHintMoonMask(EnGs* enGs) {
 // outForeignText: ComboShip out-param — set when the pick lands on a cross-game (OOT) hint, which
 // has no RandoCheckId. Caller must display it directly instead of resolving a check/item name.
 // outForeignIndex: ComboShip (#164) report-only out-param — that hint's gossipPool index.
+// enGsOverride: ComboShip — roll for this stone instead of the one being talked to (unread-hint markers).
 RandoCheckId GetRandomCheck(bool repeatableOnlyObtained = false, std::string* outForeignText = nullptr,
-                            int* outForeignIndex = nullptr) {
-    EnGs* enGs = GetGossipStone();
+                            int* outForeignIndex = nullptr, EnGs* enGsOverride = nullptr) {
+    EnGs* enGs = enGsOverride != nullptr ? enGsOverride : GetGossipStone();
     if (enGs == nullptr) {
         return RC_UNKNOWN;
     }
@@ -212,6 +214,12 @@ extern "C" void (*gMMComboHintReveal)(int fileNum, int kind, int poolIndex, cons
 // Report a stone hint the game is about to display: a cross-game pool pick by index (kind 0), or a
 // native MM check by its combo-spoiler name (kind 1, plain text — no color codes). A trap check's
 // disguise name re-rolls per scene init, so the launcher dedupes kind 1 on the check name alone.
+// The launcher's read-state key for a native MM stone hint (kind 1): the check's combo-spoiler name.
+static std::string ComboStoneCheckKey(RandoCheckId rc) {
+    const std::string& display = Rando::StaticData::GetCheckDisplayName(rc);
+    return display.empty() ? Rando::StaticData::CheckNames[rc] : display;
+}
+
 static void ComboReportStoneHint(int poolIndex, RandoCheckId rc, bool showExact) {
     if (gMMComboHintReveal == nullptr || gSaveContext.fileNum == 0xFF) {
         return;
@@ -223,12 +231,111 @@ static void ComboReportStoneHint(int poolIndex, RandoCheckId rc, bool showExact)
     if (rc == RC_UNKNOWN) {
         return;
     }
-    const std::string& display = Rando::StaticData::GetCheckDisplayName(rc);
-    const std::string key = display.empty() ? Rando::StaticData::CheckNames[rc] : display;
+    const std::string key = ComboStoneCheckKey(rc);
     const std::string text = Rando::StaticData::GetItemName(RANDO_SAVE_CHECKS[rc].randoItemId, true, rc) +
                              " is hidden " + Rando::StaticData::GetLocationNameForHint(rc, showExact);
     gMMComboHintReveal(gSaveContext.fileNum, 1, -1, key.c_str(), text.c_str());
 }
+// ComboShip: unread-hint markers. A slow trickle of sparkles over every gossip stone whose hint the
+// player hasn't read yet, so it's obvious which stones are still worth talking to. Read state lives in
+// the launcher's per-slot container (the same one the combo Hint Tracker shows).
+extern "C" int (*gMMComboHintIsRead)(int fileNum, int kind, int poolIndex, const char* key);
+
+namespace {
+
+constexpr const char* kCvarUnreadMarkers = "gCombo.HintTracker.UnreadMarkers";
+constexpr const char* kCvarUnreadMarkerColor = "gCombo.HintTracker.UnreadMarkerColor";
+constexpr Color_RGBA8 kDefaultUnreadMarkerColor = { 120, 220, 255, 255 };
+constexpr u32 kMarkerSpawnInterval = 5;
+constexpr f32 kMarkerMaxDistance = 2500.0f;
+
+// What a stone will say, in the launcher's read-state terms. kind -1 = nothing trackable.
+struct StoneHintId {
+    int kind = -1;
+    int poolIndex = -1;
+    std::string key;
+    uint64_t gen = 0;
+};
+
+std::unordered_map<Actor*, StoneHintId> sStoneHintIds;
+
+// Mirrors the text hooks below: a moon stone's mask hint wins, else the free stone hint (if enabled).
+StoneHintId ComputeStoneHintId(EnGs* enGs) {
+    StoneHintId id;
+    id.gen = Rando::MiscBehavior::ComboRandoGen();
+    if (ShouldHintMoonMask(enGs)) {
+        RandoItemId randoItemId = Rando::StaticData::GetItemIdFromVanillaItemId(ITEM_MASK_TRUTH + enGs->unk_195 - 1);
+        RandoCheckId randoCheckId = Rando::FindItemPlacement(randoItemId);
+        // A mask placed in OOT is hinted through the NPC itemLocations text, which isn't always
+        // reported; leave those unmarked rather than sparkle forever.
+        if (randoCheckId != RC_UNKNOWN) {
+            id.kind = 1;
+            id.key = ComboStoneCheckKey(randoCheckId);
+        }
+        return id;
+    }
+    if (!RANDO_SAVE_OPTIONS[RO_HINTS_GOSSIP_STONES]) {
+        return id;
+    }
+    // GetRandomCheck reseeds the shared Ship_Random stream; put it back so looking ahead is invisible.
+    u64 rngState;
+    u8 rngSeeded;
+    Ship_Random_GetState(&rngState, &rngSeeded);
+    std::string foreignText;
+    int foreignIndex = -1;
+    RandoCheckId randoCheckId = GetRandomCheck(false, &foreignText, &foreignIndex, enGs);
+    Ship_Random_SetState(rngState, rngSeeded);
+    if (!foreignText.empty()) {
+        if (foreignIndex >= 0) {
+            id.kind = 0;
+            id.poolIndex = foreignIndex;
+        }
+    } else if (randoCheckId != RC_UNKNOWN) {
+        id.kind = 1;
+        id.key = ComboStoneCheckKey(randoCheckId);
+    }
+    return id;
+}
+
+// Tiny local LCG for sparkle jitter, so markers never draw from the game's RNG.
+u32 sMarkerJitter = 0x2468ACEu;
+f32 MarkerJitter(f32 range) {
+    sMarkerJitter = sMarkerJitter * 1664525u + 1013904223u;
+    return ((f32)(sMarkerJitter >> 8) / (f32)(1u << 24) * 2.0f - 1.0f) * range;
+}
+
+void UpdateUnreadStoneMarker(EnGs* enGs) {
+    if (gMMComboHintIsRead == nullptr || gSaveContext.fileNum == 0xFF || !CVarGetInteger(kCvarUnreadMarkers, 1)) {
+        return;
+    }
+    if ((gPlayState->gameplayFrames % kMarkerSpawnInterval) != 0) {
+        return;
+    }
+    Player* player = GET_PLAYER(gPlayState);
+    if (player == nullptr || Math_Vec3f_DistXYZ(&enGs->actor.world.pos, &player->actor.world.pos) > kMarkerMaxDistance) {
+        return;
+    }
+    auto it = sStoneHintIds.find(&enGs->actor);
+    if (it == sStoneHintIds.end() || it->second.gen != Rando::MiscBehavior::ComboRandoGen()) {
+        it = sStoneHintIds.insert_or_assign(&enGs->actor, ComputeStoneHintId(enGs)).first;
+    }
+    const StoneHintId& id = it->second;
+    if (id.kind < 0 || gMMComboHintIsRead(gSaveContext.fileNum, id.kind, id.poolIndex, id.key.c_str()) != 0) {
+        return;
+    }
+
+    Color_RGBA8 color = CVarGetColor(kCvarUnreadMarkerColor, kDefaultUnreadMarkerColor);
+    Color_RGBA8 prim = { (u8)MIN(255, color.r + 100), (u8)MIN(255, color.g + 100), (u8)MIN(255, color.b + 100),
+                         255 };
+    Color_RGBA8 env = { color.r, color.g, color.b, 0 };
+    Vec3f pos = { enGs->actor.world.pos.x + MarkerJitter(12.0f), enGs->actor.world.pos.y + 58.0f + MarkerJitter(6.0f),
+                  enGs->actor.world.pos.z + MarkerJitter(12.0f) };
+    Vec3f velocity = { 0.0f, 0.6f, 0.0f };
+    Vec3f accel = { 0.0f, 0.0f, 0.0f };
+    EffectSsKirakira_SpawnDispersed(gPlayState, &pos, &velocity, &accel, &prim, &env, 1400, 24);
+}
+
+} // namespace
 #else
 static void ComboReportStoneHint(int, RandoCheckId, bool) {
 }
@@ -249,6 +356,14 @@ void Rando::ActorBehavior::InitEnGsBehavior() {
     bool randomHints =
         IS_RANDO && (RANDO_SAVE_OPTIONS[RO_HINTS_GOSSIP_STONES] || RANDO_SAVE_OPTIONS[RO_HINTS_PURCHASEABLE]);
     bool moonMaskHints = IS_RANDO && RANDO_SAVE_OPTIONS[RO_HINTS_MOON_GOSSIP_STONES];
+
+#ifdef COMBO_BUILD
+    // ComboShip: unread-hint markers (see UpdateUnreadStoneMarker).
+    COND_ID_HOOK(OnActorUpdate, ACTOR_EN_GS, randomHints || moonMaskHints,
+                 [](Actor* actor) { UpdateUnreadStoneMarker((EnGs*)actor); });
+    COND_ID_HOOK(OnActorDestroy, ACTOR_EN_GS, randomHints || moonMaskHints,
+                 [](Actor* actor) { sStoneHintIds.erase(actor); });
+#endif
 
     COND_VB_SHOULD(VB_GS_CONSIDER_MASK_OF_TRUTH_EQUIPPED, randomHints, { *should = true; });
 

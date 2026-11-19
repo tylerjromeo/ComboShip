@@ -3284,6 +3284,23 @@ static void Combo_MM_ApplyCheckPrices() {
 extern std::unordered_map<RandoItemId, u32> riToWeight;
 extern std::unordered_map<RandoItemType, u32> itemTypeToWeight;
 
+// ComboShip: RandoCheckId -> friendly spoiler name + hint region, for external tools (the AI hint
+// skill) that read randoSaveChecks (indexed by the enum) out of a .combosav.
+extern "C" COMBO_EXPORT const char* MM_DumpCheckIndex(void) {
+    static std::string cached;
+    nlohmann::json out = nlohmann::json::array();
+    for (auto& [id, chk] : Rando::StaticData::Checks) {
+        const std::string& cn = Rando::StaticData::GetCheckDisplayName(id);
+        if (cn.empty())
+            continue;
+        out.push_back({ { "rc", (int)id },
+                        { "name", cn },
+                        { "region", Rando::StaticData::GetLocationNameForHint(id, false) } });
+    }
+    cached = out.dump();
+    return cached.c_str();
+}
+
 extern "C" COMBO_EXPORT const char* MM_DumpRandoStaticData(void) {
     static std::string cached;
 
@@ -4244,6 +4261,12 @@ extern "C" void (*gMMComboHintReveal)(int fileNum, int kind, int poolIndex, cons
                                       const char* text) = nullptr;
 extern "C" COMBO_EXPORT void MM_SetComboHintRevealCb(void (*cb)(int, int, int, const char*, const char*)) {
     gMMComboHintReveal = cb;
+}
+// ComboShip: unread-hint markers ask the launcher whether a stone's hint was read. Same kind/poolIndex/
+// key convention as gMMComboHintReveal; returns 1 if read, 0 if not.
+extern "C" int (*gMMComboHintIsRead)(int fileNum, int kind, int poolIndex, const char* key) = nullptr;
+extern "C" COMBO_EXPORT void MM_SetComboHintReadQueryCb(int (*cb)(int, int, int, const char*)) {
+    gMMComboHintIsRead = cb;
 }
 // ComboShip: end-gating seam (mirrors OOT). z_boss_07.c calls gComboFinalBossDefeated when Majora dies.
 extern "C" int (*gComboFinalBossDefeated)(int game, int fileNum) = nullptr;

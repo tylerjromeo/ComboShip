@@ -48,6 +48,9 @@ void Ship_CreateQuadVertexGroup(Vtx* vtxList, s32 xStart, s32 yStart, s32 width,
 f32 Ship_GetCharFontWidthNES(u8 character);
 TexturePtr Ship_GetCharFontTextureNES(u8 character);
 void Ship_Random_Seed(u64 seed);
+// ComboShip: snapshot/restore the Ship_Random stream, for side-effect-free look-ahead rolls.
+void Ship_Random_GetState(u64* outState, u8* outSeeded);
+void Ship_Random_SetState(u64 newState, u8 newSeeded);
 s32 Ship_Random(s32 min, s32 max);
 
 extern Vtx sCycleExtraItemVtx[8];

@@ -31,6 +31,10 @@ constexpr const char* kCvarShowUnrevealed = "gCombo.HintTracker.ShowUnrevealed";
 constexpr const char* kCvarShowJunk = "gCombo.HintTracker.ShowJunk";
 constexpr const char* kCvarHideRead = "gCombo.HintTracker.HideRead";
 constexpr const char* kCvarFontScale = "gCombo.HintTracker.FontScale";
+// Read by both games' unread-hint marker code (soh UnreadHintMarkers.cpp, mm EnGs.cpp).
+constexpr const char* kCvarUnreadMarkers = "gCombo.HintTracker.UnreadMarkers";
+constexpr const char* kCvarUnreadMarkerColor = "gCombo.HintTracker.UnreadMarkerColor";
+constexpr Color_RGBA8 kDefaultUnreadMarkerColor = { 120, 220, 255, 255 };
 constexpr float kDefaultFontScale = 1.4f; // the base 1.0 text is too small to read comfortably on the Thor
 constexpr int kDefaultWindowType = 1; // 1 = normal window (the hint list is text-heavy)
 
@@ -577,7 +581,30 @@ void DrawHintTrackerSharedPanel() {
             CVarSetInteger(kCvarShowJunk, showJunk ? 1 : 0);
             changed = true;
         }
+
+        ImGui::SeparatorText("In-world markers");
+        bool markers = CVarGetInteger(kCvarUnreadMarkers, 1) != 0;
+        if (ImGui::Checkbox("Sparkle over unread hint sources", &markers)) {
+            CVarSetInteger(kCvarUnreadMarkers, markers ? 1 : 0);
+            changed = true;
+        }
         ComboMenu_PopCheckbox();
+        if (markers) {
+            Color_RGBA8 c = CVarGetColor(kCvarUnreadMarkerColor, kDefaultUnreadMarkerColor);
+            float rgb[3] = { c.r / 255.0f, c.g / 255.0f, c.b / 255.0f };
+            if (ImGui::ColorEdit3("Marker color", rgb, ImGuiColorEditFlags_NoInputs)) {
+                CVarSetColor(kCvarUnreadMarkerColor, Color_RGBA8{ (uint8_t)(rgb[0] * 255.0f + 0.5f),
+                                                                  (uint8_t)(rgb[1] * 255.0f + 0.5f),
+                                                                  (uint8_t)(rgb[2] * 255.0f + 0.5f), 255 });
+                changed = true;
+            }
+            ImGui::SameLine();
+            if (ImGui::Button("Reset##markercolor")) {
+                CVarSetColor(kCvarUnreadMarkerColor, kDefaultUnreadMarkerColor);
+                changed = true;
+            }
+            ImGui::TextDisabled("Gossip stones in both games; OOT hint signs and NPCs too.");
+        }
 
         ImGui::EndTable();
     }

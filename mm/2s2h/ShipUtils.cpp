@@ -312,6 +312,16 @@ extern "C" void Ship_Random_Seed(u64 seed) {
     state = seed;
 }
 
+extern "C" void Ship_Random_GetState(u64* outState, u8* outSeeded) {
+    *outState = state;
+    *outSeeded = seeded ? 1 : 0;
+}
+
+extern "C" void Ship_Random_SetState(u64 newState, u8 newSeeded) {
+    state = newState;
+    seeded = newSeeded != 0;
+}
+
 uint32_t next32() {
     if (!seeded) {
         uint64_t seed = static_cast<uint64_t>(std::random_device{}());

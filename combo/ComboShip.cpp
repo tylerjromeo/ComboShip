@@ -406,6 +406,9 @@ typedef void (*FnSetHintRevealOot)(void (*)(int, const char*));
 static FnSetHintRevealOot SOH_SetComboHintRevealCb = nullptr;
 typedef void (*FnSetHintRevealMm)(void (*)(int, int, int, const char*, const char*));
 static FnSetHintRevealMm MM_SetComboHintRevealCb = nullptr;
+// Unread-hint markers: MM asks whether a stone's hint is in combo.hintsRead (same kind convention).
+typedef void (*FnSetHintReadQueryMm)(int (*)(int, int, int, const char*));
+static FnSetHintReadQueryMm MM_SetComboHintReadQueryCb = nullptr;
 
 // ComboShip (#173): combo-owned overlay timers. MM's play time is wall clock between flushes, so it
 // must be paused/resumed across every game swap or the time spent in OOT lands in MM's save.
@@ -1514,6 +1517,46 @@ static void Combo_OnMmHintRevealed(int fileNum, int kind, int poolIndex, const c
 } catch (const std::exception& e) {
     std::cerr << "[ComboShip] Combo_OnMmHintRevealed threw: " << e.what() << std::endl;
 } catch (...) { std::cerr << "[ComboShip] Combo_OnMmHintRevealed threw a non-std exception" << std::endl; }
+
+// MM's unread-hint markers poll this (a few times a second per nearby gossip stone). kind follows
+// Combo_OnMmHintRevealed: 0 = mmPool index, 1 = mmNative check name, 2 = mmNpc item name. Returns 1 if
+// the hint was read. Reads the cached container only; never throws across the ABI.
+static int Combo_IsMmHintRead(int fileNum, int kind, int poolIndex, const char* key) try {
+    if (!ComboIsValidSlot(fileNum))
+        return 0;
+    const char* bucket = kind == 0 ? "mmPool" : kind == 1 ? "mmNative" : kind == 2 ? "mmNpc" : nullptr;
+    if (!bucket)
+        return 0;
+    const std::string k = key ? key : "";
+    std::lock_guard<std::mutex> lk(g_containerMutex);
+    const auto& c = LoadOrCreateContainer(fileNum);
+    auto combo = c.find("combo");
+    if (combo == c.end() || !combo->is_object())
+        return 0;
+    auto read = combo->find("hintsRead");
+    if (read == combo->end() || !read->is_object())
+        return 0;
+    auto arr = read->find(bucket);
+    if (arr == read->end() || !arr->is_array())
+        return 0;
+    for (const auto& e : *arr) {
+        switch (kind) {
+            case 0:
+                if (e.is_number_integer() && e.get<int>() == poolIndex)
+                    return 1;
+                break;
+            case 1:
+                if (e.is_object() && e.value("check", std::string()) == k)
+                    return 1;
+                break;
+            default:
+                if (e.is_string() && e.get<std::string>() == k)
+                    return 1;
+                break;
+        }
+    }
+    return 0;
+} catch (...) { return 0; }
 
 // Registered into both games: record THIS game's final-boss kill for its slot and return 1 iff BOTH
 // games' bosses are now dead. game/fileNum use the GameId convention (0=OOT, 1=MM).
@@ -3226,6 +3269,7 @@ int main(int argc, char** argv) {
     // #164: combo Hint Tracker reveal reporting.
     SOH_SetComboHintRevealCb = (FnSetHintRevealOot)GetSym(sohModule, "SOH_SetComboHintRevealCb");
     MM_SetComboHintRevealCb = (FnSetHintRevealMm)GetSym(mmModule, "MM_SetComboHintRevealCb");
+    MM_SetComboHintReadQueryCb = (FnSetHintReadQueryMm)GetSym(mmModule, "MM_SetComboHintReadQueryCb");
     SOH_PrepRandoContext = (FnVoidV)GetSym(sohModule, "SOH_PrepRandoContext");
     SOH_RestoreRandoSettings = (FnTakeStr)GetSym(sohModule, "SOH_RestoreRandoSettings");
     MM_RestoreRandoSettings = (FnTakeStr)GetSym(mmModule, "MM_RestoreRandoSettings");
@@ -3540,6 +3584,8 @@ int main(int argc, char** argv) {
         SOH_SetComboHintRevealCb(Combo_OnOotHintRevealed);
     if (MM_SetComboHintRevealCb)
         MM_SetComboHintRevealCb(Combo_OnMmHintRevealed);
+    if (MM_SetComboHintReadQueryCb)
+        MM_SetComboHintReadQueryCb(Combo_IsMmHintRead);
 
     // --- 4. Initialize OOT game ---
 

@@ -109,7 +109,7 @@ static const CustomMessage journalEmptyMessage =
     CustomMessage("Hints you read will appear here.", "Gelesene Hinweise erscheinen hier.",
                   "Les indices que tu lis apparaîtront ici.");
 
-static bool IsHintRead(RandomizerHint hintKey) {
+bool IsHintRead(RandomizerHint hintKey) {
     std::lock_guard<std::mutex> lock(readHintsMutex);
     return readHints.contains(hintKey);
 }
