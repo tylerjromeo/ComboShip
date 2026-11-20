@@ -103,6 +103,7 @@ public class MainActivity extends SDLActivity{
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        moveTaskToMainDisplayIfNeeded();
         super.onCreate(savedInstanceState);
 
         Log.i("ComboShip", "onCreate start");
@@ -900,13 +901,71 @@ public class MainActivity extends SDLActivity{
         if (dualScreenManager != null && !mBrokenLibraries) dualScreenManager.start();
     }
 
+    // Thor: a front-end (Cocoon etc.) can start the game on the bottom screen, where the
+    // dual-screen presentation covers it. Re-request MainActivity on the main display: Android
+    // moves the same singleInstance task without restarting it (configChanges covers the move).
+    // Also runs from onNewIntent/onConfigurationChanged, for when the game was already running.
+    // Adapted from Dizax-git/Shipwright-Android-Dual-Screen-Bleeding-Edge.
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        getWindow().getDecorView().post(this::moveTaskToMainDisplayIfNeeded);
+    }
+
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        getWindow().getDecorView().post(this::moveTaskToMainDisplayIfNeeded);
+    }
+
+    private int moveToMainDisplayTries;
+
+    private void moveTaskToMainDisplayIfNeeded() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        int displayId = android.view.Display.DEFAULT_DISPLAY;
+        try {
+            android.view.Display display = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                    ? getDisplay() : getWindowManager().getDefaultDisplay();
+            if (display != null) displayId = display.getDisplayId();
+        } catch (Exception e) {
+            Log.w("ComboShip", "unknown launch display", e);
+        }
+        if (displayId == android.view.Display.DEFAULT_DISPLAY) {
+            moveToMainDisplayTries = 0;
+            return;
+        }
+        // If Android refuses the move (virtual display, desktop mode), don't loop forever.
+        if (isFinishing() || ++moveToMainDisplayTries > 3) return;
+        Log.i("ComboShip", "started on display " + displayId + ": moving task to the main display");
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setAction(Intent.ACTION_MAIN);
+        intent.addCategory(Intent.CATEGORY_LAUNCHER);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        try {
+            startActivity(intent, android.app.ActivityOptions.makeBasic()
+                    .setLaunchDisplayId(android.view.Display.DEFAULT_DISPLAY).toBundle());
+        } catch (Exception e) {
+            Log.w("ComboShip", "move to the main display refused", e);
+        }
+    }
+
+    // "Quit" must really close the game, not leave it running behind the launcher.
+    @Override
+    public void finish() {
+        super.finishAndRemoveTask();
+    }
+
     @Override
     protected void onDestroy() {
         if (dualScreenManager != null) {
             dualScreenManager.stop();
             dualScreenManager = null;
         }
-        super.onDestroy();
+        boolean quitting = isFinishing();
+        super.onDestroy(); // SDLActivity joins the game thread here, so saves are done
+        if (quitting) {
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
     }
 
     @Override

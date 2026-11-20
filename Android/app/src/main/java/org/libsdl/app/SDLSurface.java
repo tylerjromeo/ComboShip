@@ -112,6 +112,12 @@ public class SDLSurface extends SurfaceView implements SurfaceHolder.Callback,
 
         mWidth = width;
         mHeight = height;
+        // The activity can move from the bottom screen to the top one right after start
+        // (front-ends), so use the display the view is on now, not the one at construction.
+        Display current = getDisplay();
+        if (current != null) {
+            mDisplay = current;
+        }
         int nDeviceWidth = width;
         int nDeviceHeight = height;
         try
