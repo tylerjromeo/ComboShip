@@ -25,6 +25,7 @@
 #include <cstring>
 #include <map>
 #include <thread>
+#include <condition_variable>
 #include <mutex>
 #include <queue>
 #include <nlohmann/json.hpp>
@@ -581,11 +582,25 @@ static nlohmann::json& LoadOrCreateContainer(int fileNum) {
     return g_containerCache.emplace(fileNum, std::move(j)).first->second;
 }
 
-// Hold g_containerMutex. Serialize the cached container to a temp file, then atomic rename over it.
-static void FlushContainer(int fileNum) {
-    auto it = g_containerCache.find(fileNum);
-    if (it == g_containerCache.end())
-        return;
+// ---- Container file writer ----
+// Saves used to write the ~1.2 MB container to disk inside FlushContainer, holding g_containerMutex,
+// on whatever thread saved. On the Thor one write can take 100-200 ms, so a game-thread save stalled
+// the frame (MM->OOT checks: MM's save waited behind OOT's pool-thread write). Now FlushContainer only
+// serializes the cache (still under the lock, so the text is a consistent snapshot) and hands the text
+// to one writer thread. The in-memory cache stays the authority for every in-process read, so nothing
+// observes the lag. Per slot only the NEWEST text is kept: each snapshot is the whole container, so a
+// newer one supersedes an older one that hasn't been written yet. Same temp+rename as before, so a
+// crash still never leaves a torn file. DrainContainerWrites() runs at shutdown so Quit loses nothing;
+// EraseComboContainer drops and waits out writes for its slot so an erased save can't be put back.
+static std::mutex g_writeMutex;
+static std::condition_variable g_writeCv;
+static std::map<int, std::string> g_pendingWrites; // slot -> newest unwritten container text
+static int g_writingSlot = -1;                     // slot the writer is writing now, -1 if idle
+static bool g_writerStop = false;
+static std::thread g_writerThread;
+
+// Temp file + atomic rename. Writer thread only.
+static void WriteContainerFile(int fileNum, const std::string& text) {
     std::error_code ec;
     auto path = ComboContainerPath(fileNum);
     std::filesystem::create_directories(path.parent_path(), ec);
@@ -602,8 +617,7 @@ static void FlushContainer(int fileNum) {
                       << std::endl;
             return;
         }
-        it->second["comboRelease"] = COMBO_RELEASE_VERSION; // every write carries the current release
-        out << it->second.dump();
+        out << text;
     }
     std::filesystem::rename(tmp, path, ec);
     if (ec) { // some filesystems won't replace-on-rename — remove then retry
@@ -614,6 +628,74 @@ static void FlushContainer(int fileNum) {
         std::cerr << "[ComboShip] ERROR: cannot commit save container " << path << " (" << ec.message()
                   << ") — THIS SLOT IS NOT BEING SAVED." << std::endl;
     }
+}
+
+static void ContainerWriterLoop() {
+    std::unique_lock<std::mutex> lk(g_writeMutex);
+    for (;;) {
+        g_writeCv.wait(lk, [] { return g_writerStop || !g_pendingWrites.empty(); });
+        if (g_pendingWrites.empty())
+            return; // stop requested and nothing left to write
+        auto node = g_pendingWrites.extract(g_pendingWrites.begin());
+        g_writingSlot = node.key();
+        lk.unlock();
+        WriteContainerFile(node.key(), node.mapped());
+        lk.lock();
+        g_writingSlot = -1;
+        g_writeCv.notify_all(); // wake Drain/Drop waiters
+    }
+}
+
+// Queue the newest text for a slot. Callable under g_containerMutex (lock order: container -> write;
+// the writer never takes g_containerMutex, so it can't deadlock against a caller holding it).
+static void QueueContainerWrite(int fileNum, std::string text) {
+    std::lock_guard<std::mutex> lk(g_writeMutex);
+    if (g_writerStop) {
+        // Shutdown already drained the writer: write inline so a very late save is never dropped.
+        WriteContainerFile(fileNum, text);
+        return;
+    }
+    if (!g_writerThread.joinable())
+        g_writerThread = std::thread(ContainerWriterLoop);
+    g_pendingWrites[fileNum] = std::move(text);
+    g_writeCv.notify_all();
+}
+
+// Discard a slot's queued write and wait out one in progress (erase must not be undone by it).
+static void DropContainerWrites(int fileNum) {
+    std::unique_lock<std::mutex> lk(g_writeMutex);
+    g_pendingWrites.erase(fileNum);
+    g_writeCv.wait(lk, [fileNum] { return g_writingSlot != fileNum; });
+}
+
+// Write everything queued, then stop and join the writer. Call once at shutdown after both games'
+// deinit (their teardown can still save); later saves fall back to inline writes.
+static void DrainContainerWrites() {
+    {
+        std::lock_guard<std::mutex> lk(g_writeMutex);
+        g_writerStop = true;
+        g_writeCv.notify_all();
+    }
+    if (g_writerThread.joinable())
+        g_writerThread.join();
+}
+
+// Backstop for exit paths that skip the shutdown sequence (an exit() elsewhere): a still-joinable
+// writer would std::terminate at static destruction and drop the queued save. Declared after the
+// writer state so it is destroyed first. Idempotent with the explicit shutdown drain.
+static struct ContainerWriterExitGuard {
+    ~ContainerWriterExitGuard() {
+        DrainContainerWrites();
+    }
+} g_containerWriterExitGuard;
+
+// Hold g_containerMutex. Snapshot the cached container and queue it for the writer thread.
+static void FlushContainer(int fileNum) {
+    auto it = g_containerCache.find(fileNum);
+    if (it == g_containerCache.end())
+        return;
+    it->second["comboRelease"] = COMBO_RELEASE_VERSION; // every write carries the current release
+    QueueContainerWrite(fileNum, it->second.dump());
 }
 
 // OOT (main thread) polls this each frame via SOH_SetOutdatedSaveNotice: pops the next slot whose
@@ -635,6 +717,7 @@ static void EraseComboContainer(int slot) {
         // and any dormant MM write would put the erased save back into the slot.
         if (g_MmSaveInMemorySlot == slot)
             g_MmSaveInMemorySlot = -1;
+        DropContainerWrites(slot); // a queued or in-flight write would put the erased file back
         std::error_code ec;
         std::filesystem::remove(ComboContainerPath(slot), ec);
     }
@@ -3883,6 +3966,9 @@ int main(int argc, char** argv) {
         SOH_Deinit();
     }
     std::cerr << "[ComboShip] shutdown: deinit done" << std::endl;
+    // Both games' teardown can save, so flush the container writer only now.
+    DrainContainerWrites();
+    std::cerr << "[ComboShip] shutdown: save writes flushed" << std::endl;
 #ifdef _WIN32
     // ~Context destroyed lus's CrashHandler (and its filter is Context-dependent anyway);
     // install the late-crash filter for the FreeLibrary + CRT-exit window.
