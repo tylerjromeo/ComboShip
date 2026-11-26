@@ -62,7 +62,7 @@ void EnGirlA_RandoRestock(PlayState* play, EnGirlA* enGirlA) {
 }
 
 s32 EnGirlA_RandoCanBuyFunc(PlayState* play, EnGirlA* enGirlA) {
-    if (gSaveContext.save.saveInfo.playerData.rupees < play->msgCtx.unk1206C) {
+    if (gSaveContext.save.saveInfo.playerData.rupees < play->msgCtx.firstChoicePrice) {
         return CANBUY_RESULT_NEED_RUPEES;
     }
 
@@ -86,7 +86,7 @@ void EnGirlA_RandoBuyFunc(PlayState* play, EnGirlA* enGirlA) {
     bool wasObtained = randoSaveCheck.obtained;
 #endif
     randoSaveCheck.obtained = randoSaveCheck.cycleObtained = true;
-    Rupees_ChangeBy(-play->msgCtx.unk1206C);
+    Rupees_ChangeBy(-play->msgCtx.firstChoicePrice);
 #ifdef COMBO_BUILD
     // ComboShip: OOT-bound item — deliver cross-game instead of granting locally (mirrors CheckQueue).
     if (randoSaveCheck.randoItemId == RI_COMBO_FOREIGN) {

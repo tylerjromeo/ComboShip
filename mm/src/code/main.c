@@ -163,6 +163,7 @@ int SDL_main(int argc, char* argv[] /* void* arg*/) {
     FreeConsole();
 #endif
     Heaps_Free();
+    return 0;
 }
 
 #ifdef COMBO_BUILD
