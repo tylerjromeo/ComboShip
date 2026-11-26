@@ -1828,6 +1828,19 @@ static void Combo_FinishInit() {
 #ifdef COMBO_BUILD
     void Combo_FlushDormantAccumulators(void);
 
+    // ComboShip: OOT checks holding MM items snapshot MM's save and serialize it once the burst is
+    // over; MM is dormant while OOT plays, so OOT drives that timer (2ship SaveManager.cpp).
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameFrameUpdate>([]() {
+        static void (*sTick)(void) = nullptr;
+        static bool sTried = false;
+        if (!sTried) {
+            sTried = true;
+            sTick = (void (*)(void))Combo_ResolveSym("2ship", "MM_TickDeferredSave");
+        }
+        if (sTick)
+            sTick();
+    });
+
     GameInteractor::Instance->RegisterGameHook<GameInteractor::OnSceneInit>([](int16_t sceneNum) {
         // A combo-driven arrival is over once the first scene has loaded.
         gComboCrossArrival = 0;

@@ -23,6 +23,12 @@ void SaveManager_InitNewSaveForSlot(int mmFileNum, const unsigned char* ootName8
 // a failure is logged and leaves the fail-closed sentinel behind, and play still proceeds.
 int SaveManager_LoadSaveFile(int mmFileNum);
 void SaveManager_SaveCurrentForCombo();
+#ifdef COMBO_BUILD
+// Cross-check saves: snapshot now, serialize once the burst of checks is over (see SaveManager.cpp).
+void SaveManager_DeferSaveCurrentForCombo();
+void Combo_MM_FlushDeferredSave();
+void Combo_MM_TickDeferredSave();
+#endif
 // Stamps the "nothing usable loaded" sentinel a failed load leaves behind (fileNum 0xFF, VANILLA).
 void SaveManager_MarkNoSaveLoaded();
 #else

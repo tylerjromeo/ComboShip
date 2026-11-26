@@ -84,9 +84,10 @@ void Rando::MiscBehavior::SendForeignCheck(RandoCheckId rc) {
     } else {
         SPDLOG_WARN("[ComboShip] MM foreign sentinel at '{}' but no foreign-map entry; dropping", checkName);
     }
-    // Persist the obtained flags (set by the caller) straight into the save so the collected state
-    // survives a transition to OOT and back.
-    SaveManager_SaveCurrentForCombo();
+    // Persist the obtained flags (set by the caller) so the collected state survives a transition to
+    // OOT and back. Deferred: a burst of foreign checks (a room of pots) serializes MM once, not per
+    // check; every later read/write of the save writes the snapshot first (SaveManager.cpp).
+    SaveManager_DeferSaveCurrentForCombo();
 }
 
 // ComboShip (bug 1): shared co-op broadcast seam, called by any grant path (CheckQueue below, MM

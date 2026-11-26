@@ -1,6 +1,8 @@
 #include "SaveManager.h"
 
 #include <fstream>
+#include <chrono>
+#include <mutex>
 #include <filesystem>
 #include <nlohmann/json.hpp>
 
@@ -50,6 +52,98 @@ static ComboRando::FnComboWriteSave gComboWriteGameSave = nullptr;
 void SaveManager_SetComboSaveIO(ComboRando::FnComboReadSave r, ComboRando::FnComboWriteSave w) {
     gComboReadGameSave = r;
     gComboWriteGameSave = w;
+}
+
+// ---- Deferred cross-check saves ----
+// Every cross-game check used to persist MM on the spot ("persist NOW"), and that save is ~100 ms of
+// JSON work on the game thread on the Thor, so a burst of checks (a room of pots) hitched once per
+// check. Now those callers snapshot gSaveContext (a plain struct copy, microseconds) and the snapshot
+// is serialized once the burst is over: 1 s after the newest check, or 3 s after the first.
+//
+// Ordering is kept exactly as if each save had run immediately: every read or write of an mm section
+// goes through SaveManager_ReadSaveFile / SaveManager_WriteSaveFile / SaveManager_DeleteSaveFile, and
+// each of those writes the pending snapshot first. So no load, owl save, erase or other writer ever
+// sees the container without it, and nothing can land in between and be overwritten by it. A live
+// SaveCurrentForCombo of the same slot drops the snapshot instead (live state descends from it).
+// The snapshot (not live gSaveContext) is what gets written, so it doesn't matter what live state
+// looks like at flush time (dormant, wiped by a reset, another slot loaded).
+// Cost: a crash or force-kill within those few seconds loses the batch (the source checks' collected
+// flags usually go with it, since they are unsaved too).
+static SaveContext sDeferredSaveCtx;
+static bool sDeferredSavePending = false; // guarded by sDeferredSaveMutex (below)
+static bool sDeferredSaveDead = false;
+static std::chrono::steady_clock::time_point sDeferredSaveFirst;
+static std::chrono::steady_clock::time_point sDeferredSaveLast;
+static constexpr auto kDeferredSaveQuiet = std::chrono::milliseconds(1000);
+static constexpr auto kDeferredSaveMaxAge = std::chrono::milliseconds(3000);
+
+static void SaveManager_SaveContextForCombo(const SaveContext& ctx, bool comboDeadForSave);
+static bool Combo_MM_IsDeadForSave();
+
+// The game thread defers and ticks, but the funnels can also run on the seed-generation worker, so
+// the flush is serialized: a second thread waits until the snapshot is written, then proceeds with
+// its own read/write (order kept). Recursive because the flush re-enters the funnels.
+static std::recursive_mutex sDeferredSaveMutex;
+
+// Write the pending snapshot now. Clears the flag first, so the read-back and write inside the save
+// (which come back through the funnels below) don't write it twice.
+void Combo_MM_FlushDeferredSave() {
+    std::lock_guard<std::recursive_mutex> lk(sDeferredSaveMutex);
+    if (!sDeferredSavePending)
+        return;
+    sDeferredSavePending = false;
+    SaveManager_SaveContextForCombo(sDeferredSaveCtx, sDeferredSaveDead);
+}
+
+static void Combo_MM_SettleDeferredSaveBeforeLiveSave(int fileNum) {
+    std::lock_guard<std::recursive_mutex> lk(sDeferredSaveMutex);
+    if (!sDeferredSavePending)
+        return;
+    if (sDeferredSaveCtx.fileNum == fileNum) {
+        sDeferredSavePending = false; // the live save about to run supersedes it
+        return;
+    }
+    Combo_MM_FlushDeferredSave();
+}
+
+void SaveManager_DeferSaveCurrentForCombo() {
+    if (gSaveContext.fileNum < 0 || gSaveContext.fileNum > 2) {
+        SPDLOG_ERROR("[ComboShip] SaveManager_DeferSaveCurrentForCombo: refusing, fileNum={} is not a loaded slot",
+                     gSaveContext.fileNum);
+        return;
+    }
+    std::lock_guard<std::recursive_mutex> lk(sDeferredSaveMutex);
+    if (sDeferredSavePending && sDeferredSaveCtx.fileNum != gSaveContext.fileNum) {
+        Combo_MM_FlushDeferredSave(); // never fold two slots into one snapshot
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (!sDeferredSavePending)
+        sDeferredSaveFirst = now;
+    sDeferredSaveLast = now;
+    sDeferredSaveCtx = gSaveContext;
+    sDeferredSaveDead = Combo_MM_IsDeadForSave();
+    sDeferredSavePending = true;
+}
+
+// Called every frame by whichever game is in the foreground: MM's own frame hook, and OOT's through
+// the MM_TickDeferredSave export (MM is dormant then, but the snapshot doesn't need it running).
+void Combo_MM_TickDeferredSave() {
+    std::lock_guard<std::recursive_mutex> lk(sDeferredSaveMutex);
+    if (!sDeferredSavePending)
+        return;
+    const auto now = std::chrono::steady_clock::now();
+    if (now - sDeferredSaveLast >= kDeferredSaveQuiet || now - sDeferredSaveFirst >= kDeferredSaveMaxAge) {
+        Combo_MM_FlushDeferredSave();
+    }
+}
+
+extern "C" COMBO_EXPORT void MM_TickDeferredSave(void) {
+    Combo_MM_TickDeferredSave();
+}
+
+// Launcher: shutdown and container copy/erase.
+extern "C" COMBO_EXPORT void MM_FlushDeferredSave(void) {
+    Combo_MM_FlushDeferredSave();
 }
 
 // ComboShip: classify a save filename. Returns the 1-based slot N for a "file{N}.json" (main or
@@ -163,6 +257,7 @@ void SaveManager_WriteSaveFile(const std::filesystem::path& fileName, nlohmann::
         if (isBackup)
             return; // container's atomic write makes MM's per-slot backup redundant
         if (n > 0 && !isGlobal) {
+            Combo_MM_FlushDeferredSave(); // an older snapshot must land first
             gComboWriteGameSave(ComboRando::GAME_MM, n - 1, j.dump().c_str());
             return;
         }
@@ -259,18 +354,20 @@ void SaveManager_InitNewSaveForSlot(int mmFileNum, const unsigned char* ootName8
     SaveManager_WriteSaveFile(SaveManager_GetFileName(mmFileNum), j);
 }
 
-void SaveManager_SaveCurrentForCombo() {
 #ifdef COMBO_BUILD
-    // Guard the write itself, not each caller's own gate. 0xFF (no save) reaches here on real,
-    // non-buggy paths (play proceeding after a failed load), so refuse and return — don't assert.
-    if (gSaveContext.fileNum < 0 || gSaveContext.fileNum > 2) {
-        SPDLOG_ERROR("[ComboShip] SaveManager_SaveCurrentForCombo: refusing write, fileNum={} is not a "
-                     "loaded slot",
-                     gSaveContext.fileNum);
-        return;
-    }
+// ComboShip (#death-jingle-hang): this is the only save writer with no "don't persist while dead"
+// guard, so it floors health in the SERIALIZED doc. Evaluated against live state when the save is
+// requested (a deferred snapshot carries the verdict from its capture frame).
+static bool Combo_MM_IsDeadForSave() {
+    return ((gPlayState != nullptr && gPlayState->gameOverCtx.state != GAMEOVER_INACTIVE) ||
+            gSaveContext.save.saveInfo.playerData.health == 0) &&
+           gSaveContext.save.saveInfo.playerData.health < 0x30;
+}
 #endif
-    int mmFileNum = (int)gSaveContext.fileNum + 1;
+
+// Serialize `ctx` (the live gSaveContext, or a deferred snapshot of it) into its slot's mm section.
+static void SaveManager_SaveContextForCombo(const SaveContext& ctx, bool comboDeadForSave) {
+    int mmFileNum = (int)ctx.fileNum + 1;
     std::string fileName = SaveManager_GetFileName(mmFileNum);
     nlohmann::json j;
 #ifdef COMBO_BUILD
@@ -280,26 +377,23 @@ void SaveManager_SaveCurrentForCombo() {
         j = nlohmann::json{};
     }
 #endif
-    j["newCycleSave"]["save"] = gSaveContext.save;
+    j["newCycleSave"]["save"] = ctx.save;
 #ifdef COMBO_BUILD
     // ComboShip (#death-jingle-hang): this is the only save writer with no "don't persist while dead"
     // guard. Floor health in the SERIALIZED doc only — never touch live gSaveContext or the load path.
-    bool comboDeadForSave = ((gPlayState != nullptr && gPlayState->gameOverCtx.state != GAMEOVER_INACTIVE) ||
-                             gSaveContext.save.saveInfo.playerData.health == 0) &&
-                            gSaveContext.save.saveInfo.playerData.health < 0x30;
     if (comboDeadForSave) {
         j["newCycleSave"]["save"]["saveInfo"]["playerData"]["health"] = 0x30;
     }
     if (j.contains("owlSave")) {
         if (gComboOwlBlobSlot == mmFileNum) {
-            // gSaveContext descends from this blob, so refresh the WHOLE SaveContext — same shape the
+            // ctx descends from this blob, so refresh the WHOLE SaveContext — same shape the
             // owl writer emits. Refreshing only ["save"] would leave the blob's eventInf and bottle
             // timers frozen while save moved on, a mix no vanilla writer can produce.
             try {
                 // at() so a malformed blob throws into the catch below; operator[] would insert
                 // nulls and leave a blob that only fails later, at load.
                 nlohmann::json keep = j.at("owlSave").at("save");
-                j["owlSave"] = gSaveContext;
+                j["owlSave"] = ctx;
                 // Blob-owned: live RAM clears these right after every owl write.
                 j["owlSave"]["save"]["isOwlSave"] = keep.at("isOwlSave");
                 j["owlSave"]["save"]["shipSaveInfo"]["pauseSaveEntrance"] =
@@ -321,6 +415,26 @@ void SaveManager_SaveCurrentForCombo() {
     j["version"] = CURRENT_SAVE_VERSION;
     j["type"] = "2S2H_SAVE";
     SaveManager_WriteSaveFile(fileName, j);
+}
+
+void SaveManager_SaveCurrentForCombo() {
+#ifdef COMBO_BUILD
+    // Guard the write itself, not each caller's own gate. 0xFF (no save) reaches here on real,
+    // non-buggy paths (play proceeding after a failed load), so refuse and return — don't assert.
+    if (gSaveContext.fileNum < 0 || gSaveContext.fileNum > 2) {
+        SPDLOG_ERROR("[ComboShip] SaveManager_SaveCurrentForCombo: refusing write, fileNum={} is not a "
+                     "loaded slot",
+                     gSaveContext.fileNum);
+        return;
+    }
+    // A pending cross-check snapshot of this slot is superseded: live state descends from it (any
+    // reload in between went through SaveManager_ReadSaveFile, which flushes it first). Another
+    // slot's snapshot is written first, as it would have been.
+    Combo_MM_SettleDeferredSaveBeforeLiveSave(gSaveContext.fileNum);
+    SaveManager_SaveContextForCombo(gSaveContext, Combo_MM_IsDeadForSave());
+#else
+    SaveManager_SaveContextForCombo(gSaveContext, false);
+#endif
 }
 
 #ifdef COMBO_BUILD
@@ -446,6 +560,7 @@ void SaveManager_DeleteSaveFile(const std::filesystem::path& fileName) {
         bool isBackup, isGlobal;
         int n = SaveManager_ClassifySaveFile(fileName, isBackup, isGlobal);
         if (n > 0 && !isBackup && !isGlobal) {
+            Combo_MM_FlushDeferredSave(); // keep write order: the snapshot predates this delete
             gComboWriteGameSave(ComboRando::GAME_MM, n - 1, "null");
             return;
         }
@@ -470,6 +585,7 @@ int SaveManager_ReadSaveFile(const std::filesystem::path& fileName, nlohmann::js
         bool isBackup, isGlobal;
         int n = SaveManager_ClassifySaveFile(fileName, isBackup, isGlobal);
         if (n > 0 && !isBackup && !isGlobal) {
+            Combo_MM_FlushDeferredSave(); // never read a section that is missing a pending snapshot
             const char* section = gComboReadGameSave(ComboRando::GAME_MM, n - 1);
             if (!section || section[0] == '\0')
                 return -1;

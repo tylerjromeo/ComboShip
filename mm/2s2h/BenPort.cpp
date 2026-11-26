@@ -1210,6 +1210,8 @@ extern "C" void InitOTR(int argc, char* argv[]) {
             fast3d->SetIsRunning(false);
         }
     });
+    // ComboShip: write a batch of deferred cross-check saves once it goes quiet (SaveManager.cpp).
+    GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameStateUpdate>([]() { Combo_MM_TickDeferredSave(); });
     // Shared Items: per-frame drain seam. Always-on (not Anchor-gated) so it also runs solo.
     GameInteractor::Instance->RegisterGameHook<GameInteractor::OnGameStateUpdate>([]() {
         if (gMMComboSharedTick) {
@@ -4198,7 +4200,8 @@ void Combo_MM_GiveDormantResolved(RandoItemId rid) {
     }
     Combo_MM_FlushAccumulators();
     if (gSaveContext.fileNum != 0xFF) {
-        SaveManager_SaveCurrentForCombo(); // persist NOW
+        // Snapshot now, serialize once a burst of checks is over (SaveManager.cpp, deferred saves).
+        SaveManager_DeferSaveCurrentForCombo();
     }
 }
 

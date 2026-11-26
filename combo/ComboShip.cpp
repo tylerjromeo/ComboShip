@@ -282,6 +282,9 @@ static FnMMLoadSave MM_LoadSaveForCombo = nullptr;
 // launcher replaces a slot's mm section underneath it.
 typedef void (*FnMMInvalidateOwlBlob)(void);
 static FnMMInvalidateOwlBlob MM_InvalidateOwlBlobSlot = nullptr;
+// MM snapshots cross-check saves and serializes them after a burst; write any pending one before the
+// launcher copies/erases a container or shuts down (2ship SaveManager.cpp, deferred saves).
+static void (*MM_FlushDeferredSave)(void) = nullptr;
 // #89 resume-into-MM: drop out of OOT's loop before it runs a Play frame / tell MM how it was entered.
 // SOH_IsOnFileSelect distinguishes a real file-select load from the OnLoadGame that TitleSetup fires
 // on the MM->OOT return (which must not bounce the player straight back into MM).
@@ -710,6 +713,8 @@ static int Combo_TakeEvictionNotice() {
 }
 
 static void EraseComboContainer(int slot) {
+    if (MM_FlushDeferredSave)
+        MM_FlushDeferredSave(); // outside the lock: it writes through Combo_WriteGameSave
     {
         std::lock_guard<std::mutex> lk(g_containerMutex);
         g_containerCache.erase(slot);
@@ -734,6 +739,8 @@ static void EraseComboContainer(int slot) {
 // Copy a whole slot (both games + baked rando) — OOT file-select "copy file". Registered into OOT
 // via SOH_SetCopyContainer; the .combosav has no per-game file to copy, so the launcher owns it.
 static void Combo_CopyContainer(int from, int to) {
+    if (MM_FlushDeferredSave)
+        MM_FlushDeferredSave(); // the copy must include it (outside the lock, see EraseComboContainer)
     {
         std::lock_guard<std::mutex> lk(g_containerMutex);
         nlohmann::json copy = LoadOrCreateContainer(from); // deep copy of the source container
@@ -3322,6 +3329,7 @@ int main(int argc, char** argv) {
     SOH_GetCurrentPlayerName = (FnGetPlayerName)GetSym(sohModule, "SOH_GetCurrentPlayerName");
     MM_LoadSaveForCombo = (FnMMLoadSave)GetSym(mmModule, "MM_LoadSaveForCombo");
     MM_InvalidateOwlBlobSlot = (FnMMInvalidateOwlBlob)GetSym(mmModule, "MM_InvalidateOwlBlobSlot");
+    MM_FlushDeferredSave = (void (*)(void))GetSym(mmModule, "MM_FlushDeferredSave");
     SOH_ParkForComboMMResume = (FnVoid)GetSym(sohModule, "SOH_ParkForComboMMResume");
     MM_SetComboEntryIsResume = (FnMMInitSave)GetSym(mmModule, "MM_SetComboEntryIsResume");
     SOH_IsOnFileSelect = (FnIsOnFileSelect)GetSym(sohModule, "SOH_IsOnFileSelect");
@@ -3957,6 +3965,10 @@ int main(int argc, char** argv) {
     if (ComboUI_RestoreTrackerIntent)
         ComboUI_RestoreTrackerIntent();
 
+    if (MM_FlushDeferredSave && mmBooted) {
+        std::cerr << "[ComboShip] shutdown: MM deferred save" << std::endl;
+        MM_FlushDeferredSave(); // a batch of cross-check saves still waiting for its quiet period
+    }
     if (MM_Deinit && mmBooted) {
         std::cerr << "[ComboShip] shutdown: MM_Deinit" << std::endl;
         MM_Deinit();
