@@ -7,6 +7,7 @@
 bool Scene_CommandTimeSettings(PlayState* play, SOH::ISceneCommand* cmd);
 
 extern "C" {
+#include "functions.h"
 #include "variables.h"
 #include "z64save.h"
 extern SaveContext gSaveContext;
@@ -19,16 +20,18 @@ extern PlayState* gPlayState;
 std::set<SceneID> fogControlList = {
     SCENE_MARKET_ENTRANCE_DAY,
     SCENE_MARKET_ENTRANCE_NIGHT,
-    SCENE_MARKET_ENTRANCE_RUINS,
     SCENE_BACK_ALLEY_DAY,
     SCENE_BACK_ALLEY_NIGHT,
     SCENE_MARKET_DAY,
     SCENE_MARKET_NIGHT,
-    SCENE_MARKET_RUINS,
     SCENE_TEMPLE_OF_TIME_EXTERIOR_DAY,
     SCENE_TEMPLE_OF_TIME_EXTERIOR_NIGHT,
-    SCENE_TEMPLE_OF_TIME_EXTERIOR_RUINS,
 };
+
+bool InRuinedMarketScenes(SceneID sceneNum) {
+    return sceneNum == SCENE_MARKET_ENTRANCE_RUINS || sceneNum == SCENE_MARKET_RUINS ||
+           sceneNum == SCENE_TEMPLE_OF_TIME_EXTERIOR_RUINS;
+}
 
 std::set<SceneID> skyboxSceneControlList = {
     SCENE_MARKET_ENTRANCE_DAY,
@@ -62,6 +65,7 @@ std::set<SkyboxId> skyboxIdControlList = {
     SKYBOX_ZORA_SHOP,
     SKYBOX_POTION_SHOP_KAKARIKO,
     SKYBOX_POTION_SHOP_MARKET,
+    SKYBOX_BOMBCHU_SHOP,
     SKYBOX_HOUSE_RICHARD,
     SKYBOX_HOUSE_IMPA,
     SKYBOX_TENT,
@@ -91,6 +95,7 @@ void Register3DPreRenderedScenes() {
 
         // Replace skybox with normal sky
         SyncSkyboxTimeToCurrentTime();
+        gSaveContext.skyboxTime = gSaveContext.dayTime;
         gPlayState->skyboxId = SKYBOX_NORMAL_SKY;
         // Apply the always cloudy skybox as an adult for Temple of Time and the Market
         if (sceneNum == SCENE_TEMPLE_OF_TIME_EXTERIOR_RUINS || sceneNum == SCENE_MARKET_RUINS ||
@@ -101,16 +106,46 @@ void Register3DPreRenderedScenes() {
     });
 
     COND_HOOK(OnPlayDrawBegin, CVAR_VALUE, []() {
-        if (!fogControlList.contains(static_cast<SceneID>(gPlayState->sceneNum))) {
+        const auto sceneNum = static_cast<SceneID>(gPlayState->sceneNum);
+        if (InRuinedMarketScenes(sceneNum)) {
+            // Only activate fog control if the scene is flagged as indoors (market scenes are in vanilla)
+            if (gPlayState->envCtx.indoors) {
+                gPlayState->view.zFar = 8800;
+                gPlayState->lightCtx.fogColor[0] = 24;
+                gPlayState->lightCtx.fogColor[1] = 9;
+                gPlayState->lightCtx.fogColor[2] = 24;
+                gPlayState->lightCtx.fogNear = 946;
+                gPlayState->lightCtx.fogFar = 8800;
+            }
+        }
+
+        if (!fogControlList.contains(sceneNum)) {
             return;
         }
 
+        gPlayState->envCtx.sunMoonDisabled = false;
+        gSaveContext.skyboxTime = gSaveContext.dayTime;
+
         if ((HREG(80) != 10) || (HREG(82) != 0)) {
-            // Furthest possible fog and zFar
-            gPlayState->view.zFar = 12800;
-            gPlayState->lightCtx.fogNear = 1000;
-            gPlayState->lightCtx.fogFar = 12800;
+            // Only activate fog control if the scene is flagged as indoors (market scenes are in vanilla)
+            if (gPlayState->envCtx.indoors) {
+                // Furthest possible fog and zFar
+                gPlayState->view.zFar = 12800;
+                gPlayState->lightCtx.fogNear = 1000;
+                gPlayState->lightCtx.fogFar = 12800;
+            }
         }
+    });
+
+    COND_HOOK(OnPlayDrawAfterSkyboxFilters, CVAR_VALUE, []() {
+        if (!InRuinedMarketScenes(static_cast<SceneID>(gPlayState->sceneNum)) || gPlayState->envCtx.skyboxDisabled ||
+            gPlayState->skyboxId != SKYBOX_NORMAL_SKY) {
+            return;
+        }
+
+        SkyboxDraw_Draw(&gPlayState->skyboxCtx, gPlayState->state.gfxCtx, gPlayState->skyboxId,
+                        gPlayState->envCtx.skyboxBlend, gPlayState->view.eye.x, gPlayState->view.eye.y,
+                        gPlayState->view.eye.z);
     });
 
     COND_VB_SHOULD(VB_DRAW_2D_BACKGROUND, CVAR_VALUE, { *should = false; });

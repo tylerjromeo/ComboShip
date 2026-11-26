@@ -108,8 +108,10 @@ bool showDungeonSigns;
 bool showOverworldWonderItems;
 bool showDungeonWonderItems;
 bool showBeggar;
+bool showFishHat;
 bool showIcicles;
 bool showRedIce;
+bool showFireGorons;
 bool showFrogSongRupees;
 bool showFountainFairies;
 bool showStoneFairies;
@@ -1884,8 +1886,10 @@ void LoadSettings() {
                 break;
         }
         showBeggar = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_BEGGAR);
+        showFishHat = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_FISHERMANS_HAT);
         showIcicles = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_ICICLES);
         showRedIce = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_RED_ICE);
+        showFireGorons = OTRGlobals::Instance->gRandomizer->GetRandoSettingValue(RSK_SHUFFLE_FIRE_GORONS);
     } else { // Vanilla
         showOverworldTokens = true;
         showDungeonTokens = true;
@@ -1905,8 +1909,10 @@ void LoadSettings() {
         showOverworldSigns = false;
         showDungeonSigns = false;
         showBeggar = false;
+        showFishHat = false;
         showIcicles = false;
         showRedIce = false;
+        showFireGorons = false;
     }
 
     fortressFast = false;
@@ -2028,6 +2034,7 @@ bool IsCheckShuffled(RandomizerCheck rc) {
                ((loc->GetRCType() != RCTYPE_MERCHANT || (showMerchants && rc != RC_ZR_MAGIC_BEAN_SALESMAN)) ||
                 (rc == RC_ZR_MAGIC_BEAN_SALESMAN && showBeans)) &&
                (loc->GetRCType() != RCTYPE_BEGGAR || showBeggar) &&
+               (loc->GetRCType() != RCTYPE_FISH_HAT || showFishHat) &&
                (loc->GetRCType() != RCTYPE_SONG_LOCATION || showSongs) &&
                (loc->GetRCType() != RCTYPE_BEEHIVE || showBeehives) &&
                (loc->GetRCType() != RCTYPE_OCARINA || showOcarinas) &&
@@ -2067,6 +2074,7 @@ bool IsCheckShuffled(RandomizerCheck rc) {
                 (showDungeonWonderItems && RandomizerCheckObjects::AreaIsDungeon(loc->GetArea()))) &&
                (loc->GetRCType() != RCTYPE_ICICLE || showIcicles) &&
                (loc->GetRCType() != RCTYPE_RED_ICE || showRedIce) &&
+               (loc->GetRCType() != RCTYPE_FIRE_GORON || showFireGorons) &&
                (loc->GetRCType() != RCTYPE_FISH || Rando::Fishsanity::GetFishLocationIncluded(loc)) &&
                (loc->GetRCType() != RCTYPE_FREESTANDING ||
                 (showOverworldFreestanding && RandomizerCheckObjects::AreaIsOverworld(loc->GetArea())) ||
