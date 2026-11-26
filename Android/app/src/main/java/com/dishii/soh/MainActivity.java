@@ -91,7 +91,7 @@ public class MainActivity extends SDLActivity{
     private static final int TOUCH_FACE_BUTTON_LAYOUT_GAMECUBE = 2;
     private static final String SUPPORT_FILES_VERSION_MARKER = ".android_support_files_version";
     // Bump only for support archive/layout changes. Extractor YAML is content-versioned separately.
-    private static final String SUPPORT_FILES_VERSION = "comboship-0.3.0-android-2";
+    private static final String SUPPORT_FILES_VERSION = "comboship-0.4.0-android-1";
     // Bundled in the APK and copied to the data folder root: ComboShip's two port archives, and the
     // SDL controller database libultraship loads from there (without it the Thor's built-in
     // controller isn't recognized as a gamepad).
