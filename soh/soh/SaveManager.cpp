@@ -2378,7 +2378,25 @@ void SaveManager::SaveBase(const SaveContext& saveContext, int sectionID, bool f
     SaveManager::Instance->SaveData("healthCapacity", saveContext.healthCapacity);
     SaveManager::Instance->SaveData("health", saveContext.health);
     SaveManager::Instance->SaveData("magicLevel", saveContext.magicLevel);
+#ifdef COMBO_BUILD
+    {
+        // ComboShip: every load stages the meter empty (magic = 0, magicLevel = 0, target = saved
+        // magic) and Interface_Update refills it over ~1 s once Link is free to move (no transition,
+        // text box or cutscene). A save in that window (switch save at the Mask Shop door, dormant
+        // cross-grant saves, Anchor) wrote magic = 0, so the next MM->OOT return came back empty.
+        // Persist the fill target while the meter is staged, stepping capacity, or filling.
+        s16 magicToSave = saveContext.magic;
+        if (saveContext.isMagicAcquired &&
+            (saveContext.magicLevel == 0 || saveContext.magicState == MAGIC_STATE_STEP_CAPACITY ||
+             saveContext.magicState == MAGIC_STATE_FILL)) {
+            s16 cap = (saveContext.isDoubleMagicAcquired + 1) * MAGIC_NORMAL_METER;
+            magicToSave = std::clamp<s16>(std::max<s16>(saveContext.magic, saveContext.magicFillTarget), 0, cap);
+        }
+        SaveManager::Instance->SaveData("magic", (s8)magicToSave);
+    }
+#else
     SaveManager::Instance->SaveData("magic", saveContext.magic);
+#endif
     SaveManager::Instance->SaveData("rupees", saveContext.rupees);
     SaveManager::Instance->SaveData("swordHealth", saveContext.swordHealth);
     SaveManager::Instance->SaveData("naviTimer", saveContext.naviTimer);
