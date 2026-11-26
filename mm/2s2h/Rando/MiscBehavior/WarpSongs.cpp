@@ -112,7 +112,7 @@ void Rando::MiscBehavior::WarpSongs() {
         CustomMessage::Entry entry;
         if (msgCtx->msgMode == MSGMODE_DISPLAY_SONG_PLAYED_TEXT_BEGIN && IsWarpSongId(msgCtx->songPlayed)) {
             // The "You played ..." name box, routed to this id by z_message.c for the OOT songs.
-            entry.textboxType = TEXTBOX_TYPE_3;
+            entry.textboxType = TEXTBOX_TYPE_OCARINA;
             entry.msg = std::string("You played the ") + kSongNames[msgCtx->songPlayed - OCARINA_SONG_MINUET] + ".";
         } else if (sState == WS_CONFIRM) {
             entry.nextMessageID = 0x1B95;

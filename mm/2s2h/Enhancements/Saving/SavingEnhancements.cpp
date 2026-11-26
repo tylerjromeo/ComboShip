@@ -125,7 +125,7 @@ extern "C" const char* SavingEnhancements_CannotSaveReason() {
         return "moon scene";
     }
     if (CHECK_WEEKEVENTREG(WEEKEVENTREG_08_01)) return "weekEventReg 08_01 set";
-    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_82_08)) return "weekEventReg 82_08 set";
+    if (CHECK_WEEKEVENTREG(WEEKEVENTREG_PLAYING_SWORDSMAN_MINIGAME)) return "swordsman minigame in progress";
     if (CHECK_WEEKEVENTREG(WEEKEVENTREG_90_20)) return "weekEventReg 90_20 set";
     if (CHECK_WEEKEVENTREG(WEEKEVENTREG_KICKOUT_WAIT)) return "weekEventReg KICKOUT_WAIT set";
     if (CHECK_EVENTINF(EVENTINF_34)) return "eventInf 34 set";

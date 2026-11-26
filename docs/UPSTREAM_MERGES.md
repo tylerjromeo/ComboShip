@@ -236,6 +236,10 @@ since CI now pulls each upstream in its own PR — listing every file we had to 
 mechanical 3-way merge and why. This keeps the per-merge required changes easy to track (and to diff
 against the recurring-deviation list below). Newest first:
 
+- [2026-11-26 all three](merges/2026-11-26-upstream.md) — libultraship `7f9b86a59` → `da6daf1a5`, soh
+  `ecd889c20` → `64df9cb8e` (past 9.3.1), mm `e8757c14a` → `7e3d051be`, done locally on the android
+  fork. Retires the room-entry stutter deviation (upstream #7338) and the soh interpolation
+  cherry-picks; new GAP: mm Additional Items is inert in combo seeds. Release 0.4.0.
 - [2026-09-28 soh](merges/2026-09-28-soh-develop.md) — soh `5a57a0cbc` → `576b30c64`, extended on
   2026-10-06 to `ecd889c20` (lands exactly on 9.3.0). soh extracts with
   Torch (vendored at `torch/`, forced onto the dynamic CRT); ZAPD/OTRExporter are MM-only. Retires every

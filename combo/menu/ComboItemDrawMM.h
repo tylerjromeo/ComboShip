@@ -581,7 +581,7 @@ static const MmSoulModel kMmSoulModels[] = {
     { RI_SOUL_ENEMY_POE,           gPoeSkel,                    gPoeFloatAnim,                  POE_LIMB_MAX,            1, 0.0075f,-5000.0f, { 155, 155, 155 }, 10.0f },
     { RI_SOUL_ENEMY_REDEAD,        gRedeadSkel,                 gGibdoRedeadPirouetteAnim,      REDEAD_LIMB_MAX,         0, 0.01f,  -2900.0f, { 155, 155, 155 }, 10.0f },
     { RI_SOUL_ENEMY_SHELLBLADE,    object_sb_Skel_002BF0,       object_sb_Anim_000194,          OBJECT_SB_LIMB_MAX,      0, 0.007f, -3500.0f, { 155, 155, 155 }, 10.0f },
-    { RI_SOUL_ENEMY_SKULLFISH,     object_pr_Skel_004188,       object_pr_Anim_004340,          OBJECT_PR_2_LIMB_MAX,    0, 0.02f,      0.0f, { 155, 155, 155 },  5.0f },
+    { RI_SOUL_ENEMY_SKULLFISH,     gSkullFishSkel,              gSkullFishSwimAnim,             PR_2_LIMB_MAX,           0, 0.02f,      0.0f, { 155, 155, 155 },  5.0f },
     { RI_SOUL_ENEMY_SKULLTULA,     object_st_Skel_005298,       object_st_Anim_000304,          OBJECT_ST_LIMB_MAX,      1, 0.03f,      0.0f, { 155, 155, 155 },  5.0f },
     { RI_SOUL_ENEMY_SNAPPER,       gSnapperSkel,                gSnapperIdleAnim,               SNAPPER_LIMB_MAX,        0, 0.01f,  -3100.0f, { 155, 155, 155 }, 10.0f },
     { RI_SOUL_ENEMY_STALCHILD,     gStalchildSkel,              gStalchildIdleAnim,             STALCHILD_LIMB_MAX,      1, 0.01f,  -3200.0f, { 155, 155, 155 }, 10.0f },

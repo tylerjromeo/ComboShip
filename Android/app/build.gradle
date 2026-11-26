@@ -5,7 +5,7 @@
 // ComboShip installs side by side with Ship of Harkinian / 2 Ship 2 Harkinian.
 apply plugin: 'com.android.application'
 
-def androidAppVersionName = "0.3.0-android.1"
+def androidAppVersionName = "0.4.0-android.1"
 
 // Host-built ComboShip support archives (cmake --build build-host --target GenerateSohOtr Generate2ShipOtr).
 def sohSupportArchive = providers.gradleProperty("sohSupportArchive").orElse("../../soh/soh.o2r")
