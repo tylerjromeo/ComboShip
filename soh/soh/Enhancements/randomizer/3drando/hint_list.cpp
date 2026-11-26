@@ -2152,6 +2152,11 @@ void StaticData::HintTable_Init() {
     |      WINCON HINT TEXT     |
     ---------------------------*/
 
+    hintTextTable[RHT_WINCON_DEFEAT_GANON_HINT] = HintText(CustomMessage("$wAnd the #Triforce# will be granted once #the evil one# is defeated.^",
+                                                              /*german*/ "$wUnd das #Triforce# wird gewährt, sobald #der Böse# besiegt wurde.^",
+                                                              /*french*/ "$wAussi, la #Triforce# sera accordée une fois que #le Malin# aura été vaincu.^",
+                                                                           {QM_YELLOW, QM_PINK}));
+
     hintTextTable[RHT_WINCON_ANYWHERE_HINT] = HintText(CustomMessage("$wAnd the #Triforce# will be hidden somewhere&#in Hyrule#.^",
                                                           /*german*/ "$wUnd das #Triforce# wird irgendwo #in Hyrule# zu finden sein.^",
                                                           /*french*/ "$wAussi, la #Triforce# se trouve quelque part #dans Hyrule#.^",
@@ -2314,7 +2319,7 @@ void StaticData::HintTable_Init() {
 
     hintTextTable[RHT_BOSS_KEY_HINT] = HintText(CustomMessage("%c@! I can hear Rauru's guidance! He's saying the %ykey for this door%c is in %w[[1]]%c!",
                                                    /*german*/ TODO_TRANSLATE,
-                                                   /*french*/ TODO_TRANSLATE));
+                                                   /*french*/ "%c@! J'entends Rauru me parler! Il dit que %w[[1]]%c est là où tu trouveras la %yclé de cette porte%c!"));
 
     hintTextTable[RHT_DAMPE_DIARY] = HintText(CustomMessage("Whoever reads this, please enter #[[1]]#. I will let you have my #stretching, shrinking keepsake#.^I'm waiting for you.&--Dampé",
                                                  /*german*/ "Wer immer dies liest, der möge #[[1]]# nach meinem #langen, kurzen Schatz# suchen.^Ich warte!&Boris",
